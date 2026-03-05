@@ -1,2 +1,9 @@
 @import "tailwindcss";
 @import "uniwind";
+
+/* ─── Meshlink Global Styles ─────────────────────────────── */
+
+/* Dark background foundation */
+:root {
+    color-scheme: light;
+}

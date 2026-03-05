@@ -1,31 +1,30 @@
-import { StatusBar } from "expo-status-bar";
-import { Text, View } from "react-native";
+/**
+ * Index — Entry point redirect.
+ * Routes to onboarding if first launch, otherwise to the tabs.
+ * Waits for MeshContext to finish hydration before redirecting.
+ */
+import { useEffect } from 'react';
+import { router } from 'expo-router';
+import { View, ActivityIndicator } from 'react-native';
+import { useMesh } from '../context/MeshContext';
+import { isOnboardingComplete } from '../services/storage/AppState';
 
-export default function App() {
+export default function Index() {
+  const { isInitialised } = useMesh();
+
+  useEffect(() => {
+    if (!isInitialised) return; // Wait for hydration to complete
+
+    if (isOnboardingComplete()) {
+      router.replace('/(tabs)/peers');
+    } else {
+      router.replace('/onboarding');
+    }
+  }, [isInitialised]);
+
   return (
-    <View className="flex-1 bg-white dark:bg-black items-center justify-center px-8">
-      {/* Heading */}
-      <Text className="text-4xl font-extrabold text-gray-800 dark:text-white mb-3 tracking-tight">
-        🚀 Welcome
-      </Text>
-
-      {/* Subheading */}
-      <Text className="text-xl dark:text-white text-gray-700 mb-8 text-center leading-relaxed">
-        Build beautiful apps with{" "}
-        <Text className="text-blue-500 font-semibold">
-          Expo (Router) + Uniwind 🔥
-        </Text>
-      </Text>
-
-      {/* Instruction text */}
-      <Text className="text-base text-gray-600 dark:text-white text-center max-w-sm">
-        Start customizing your app by editing{" "}
-        <Text className="font-semibold text-gray-800 dark:text-white">
-          app/index.tsx
-        </Text>
-      </Text>
-
-      <StatusBar style="dark" />
+    <View className="flex-1 bg-[#FAF6F1] items-center justify-center">
+      <ActivityIndicator size="large" color="#5C6B3C" />
     </View>
   );
 }

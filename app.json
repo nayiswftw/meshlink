@@ -1,12 +1,66 @@
 {
   "expo": {
-    "scheme": "acme",
+    "name": "Meshlink",
+    "slug": "meshlink",
+    "scheme": "meshlink",
+    "version": "1.0.0",
+    "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "orientation": "default",
+    "splash": {
+      "backgroundColor": "#0F172A"
+    },
     "web": {
       "output": "static"
     },
-    "name": "meshlink",
-    "slug": "meshlink"
+    "plugins": [
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central",
+            "peripheral"
+          ],
+          "bluetoothAlwaysPermission": "Meshlink needs Bluetooth to communicate with nearby devices."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#6366F1"
+        }
+      ],
+      "expo-font",
+      "munim-bluetooth-peripheral"
+    ],
+    "android": {
+      "package": "com.meshlink.app",
+      "permissions": [
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_ADVERTISE",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.meshlink.app",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Meshlink uses Bluetooth to discover and communicate with nearby devices.",
+        "NSBluetoothPeripheralUsageDescription": "Meshlink uses Bluetooth to communicate with nearby devices.",
+        "UIBackgroundModes": [
+          "bluetooth-central",
+          "bluetooth-peripheral"
+        ]
+      }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ea63e50f-31ae-495c-8a7e-6f8ed060117d"
+      }
+    }
   }
 }

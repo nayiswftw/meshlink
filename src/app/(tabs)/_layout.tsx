@@ -10,15 +10,14 @@ import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabLayout() {
-    const { connectedPeerCount, isScanning, bleReady } = useMesh();
+    const { connectedPeerCount, isRunning } = useMesh();
     const insets = useSafeAreaInsets();
 
     return (
         <View className="flex-1 bg-[#FAF6F1]" style={{ paddingTop: insets.top }}>
             <ConnectionBanner
                 connectedPeers={connectedPeerCount}
-                isScanning={isScanning}
-                bleReady={bleReady}
+                isRunning={isRunning}
             />
             <Tabs
                 screenOptions={{

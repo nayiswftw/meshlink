@@ -1,3 +1,10 @@
+/**
+ * MeshContext — Central app state powered by expo-bitchat.
+ *
+ * expo-bitchat handles all BLE mesh networking, encryption, peer discovery,
+ * and message routing natively. This context manages the React state layer
+ * and local message/conversation persistence.
+ */
 import React, {
     createContext,
     useContext,
@@ -8,36 +15,33 @@ import React, {
     type ReactNode,
 } from 'react';
 import { AppState as RNAppState, type AppStateStatus } from 'react-native';
+import BitchatAPI from 'expo-bitchat';
+import type { BitchatMessage, PeerInfo, Subscription } from 'expo-bitchat';
 import { createLogger } from '../services/Logger';
-import { bleManager } from '../services/ble/BleManager';
-import { meshRouter, type OnMessageReceivedCallback } from '../services/mesh/MeshRouter';
-import { peerManager } from '../services/mesh/PeerManager';
 import {
-    getOrCreateIdentity,
-    getCachedIdentity,
-    updateDisplayName,
-} from '../services/crypto/IdentityService';
-import {
-    getMessages,
+    saveMessage,
+    getPrivateMessages,
+    upsertConversation,
     getConversations as dbGetConversations,
     markConversationRead,
-    upsertConversation,
+    updateMessageStatus,
     hydrateDatabase,
+    upsertChannel,
+    getChannels as dbGetChannels,
+    getChannelMessages as dbGetChannelMessages,
+    markChannelRead,
+    deleteChannel as dbDeleteChannel,
+    searchMessages as dbSearchMessages,
+    deleteMessage as dbDeleteMessage,
 } from '../services/storage/Database';
 import {
     getSettings,
     saveSettings,
-    isOnboardingComplete,
     hydrateAppState,
 } from '../services/storage/AppState';
-import type {
-    DeviceIdentity,
-    Peer,
-    MeshMessage,
-    Conversation,
-    SerializedMessage,
-    AppSettings,
-} from '../types';
+import { requestBluetoothPermissions } from '../services/Permissions';
+import { notifyIncomingMessage, requestNotificationPermissions } from '../services/Notifications';
+import type { AppSettings, Conversation, StoredMessage, Channel } from '../types';
 
 const log = createLogger('MeshContext');
 
@@ -45,38 +49,46 @@ const log = createLogger('MeshContext');
 
 interface MeshContextType {
     // Identity
-    identity: DeviceIdentity | null;
+    nickname: string;
     isInitialised: boolean;
 
-    // Peers
-    peers: Peer[];
+    // Peers (map of peerID → nickname)
+    peers: PeerInfo;
     connectedPeerCount: number;
 
-    // Scanning
-    isScanning: boolean;
-    startScanning: () => Promise<void>;
-    stopScanning: () => void;
+    // Mesh service state
+    isRunning: boolean;
+    startMesh: () => Promise<void>;
+    stopMesh: () => Promise<void>;
 
     // Messaging
-    sendMessage: (recipientId: string, recipientPublicKey: string, text: string) => Promise<void>;
-    getMessagesForPeer: (peerId: string) => SerializedMessage[];
+    sendPrivateMessage: (recipientPeerID: string, recipientNickname: string, text: string) => Promise<void>;
+    getMessagesForPeer: (peerNickname: string) => StoredMessage[];
     markRead: (peerId: string) => void;
 
     // Conversations
     conversations: Conversation[];
     refreshConversations: () => void;
 
+    // Channels
+    channels: Channel[];
+    sendChannelMessage: (channelName: string, text: string, mentions?: string[]) => Promise<void>;
+    getChannelMessages: (channelName: string) => StoredMessage[];
+    joinChannel: (channelName: string, password?: string) => void;
+    leaveChannel: (channelName: string) => void;
+    setChannelPassword: (channelName: string, password?: string) => Promise<void>;
+    markChannelRead: (channelName: string) => void;
+
+    // Real-time message update trigger
+    messageVersion: number;
+
+    // Search & deletion
+    searchMessages: (query: string) => StoredMessage[];
+    deleteMessage: (messageId: string) => boolean;
+
     // Settings
     settings: AppSettings;
     updateSettings: (update: Partial<AppSettings>) => void;
-
-    // Connection
-    connectToPeer: (deviceId: string) => Promise<boolean>;
-
-    // BLE
-    initBle: () => Promise<boolean>;
-    requestEnableBle: () => Promise<void>;
-    bleReady: boolean;
 }
 
 const MeshContext = createContext<MeshContextType | null>(null);
@@ -84,168 +96,215 @@ const MeshContext = createContext<MeshContextType | null>(null);
 // ─── Provider ────────────────────────────────────────────────────
 
 export function MeshProvider({ children }: { children: ReactNode }) {
-    const [identity, setIdentity] = useState<DeviceIdentity | null>(null);
+    const [nickname, setNickname] = useState('');
     const [isInitialised, setIsInitialised] = useState(false);
-    const [peers, setPeers] = useState<Peer[]>([]);
-    const [isScanning, setIsScanning] = useState(false);
+    const [peers, setPeers] = useState<PeerInfo>({});
+    const [isRunning, setIsRunning] = useState(false);
     const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [channels, setChannels] = useState<Channel[]>([]);
     const [settings, setSettings] = useState<AppSettings>(getSettings());
-    const [bleReady, setBleReady] = useState(false);
+    const [messageVersion, setMessageVersion] = useState(0);
 
-    // ─── Initialise Identity ─────────────────────────────────
+    const subscriptionsRef = useRef<Subscription[]>([]);
+    const notificationsEnabledRef = useRef(settings.notificationsEnabled);
+
+    // Keep the ref in sync
+    useEffect(() => {
+        notificationsEnabledRef.current = settings.notificationsEnabled;
+    }, [settings.notificationsEnabled]);
+
+    // ─── Initialise ──────────────────────────────────────────
 
     useEffect(() => {
         (async () => {
             try {
-                // Hydrate AsyncStorage into memory caches first
                 await hydrateAppState();
                 await hydrateDatabase();
-                setSettings(getSettings());
-
-                const id = await getOrCreateIdentity();
-                setIdentity(id);
+                const s = getSettings();
+                setSettings(s);
+                setNickname(s.displayName || '');
                 setIsInitialised(true);
-
-                // Auto-initialize BLE after identity is ready.
-                // The onBleStateChanged listener (set up below) will
-                // handle starting meshRouter when BLE comes on.
-                const powered = await bleManager.init();
-                setBleReady(powered);
-                if (powered && !meshRouter.getIsRunning()) {
-                    await meshRouter.start();
-                }
             } catch (error) {
                 log.error('Init failed:', error);
             }
         })();
     }, []);
 
-    // ─── BLE Init & Reactive State ─────────────────────────────
+    // ─── Mesh Service Lifecycle ──────────────────────────────
 
-    const initBle = useCallback(async (): Promise<boolean> => {
-        const ready = await bleManager.init();
-        setBleReady(ready);
-        if (ready) {
-            if (!meshRouter.getIsRunning()) {
-                await meshRouter.start();
-            }
-        }
-        return ready;
-    }, []);
+    const setupListeners = useCallback(() => {
+        // Clear previous subscriptions
+        subscriptionsRef.current.forEach((s) => s.remove());
+        subscriptionsRef.current = [];
 
-    const requestEnableBle = useCallback(async (): Promise<void> => {
-        await bleManager.requestEnable();
-        // The persistent state listener will update bleReady reactively
-    }, []);
+        // Incoming messages
+        const msgSub = BitchatAPI.addMessageListener((message: BitchatMessage) => {
+            log.info(`Message from ${message.sender}: ${message.content.slice(0, 50)}`);
+            const isBackgrounded = appStateRef.current !== 'active';
 
-    // Subscribe to BLE adapter state changes (Bluetooth toggled in system settings).
-    // This is what makes bleReady reactive — no button tap needed.
-    useEffect(() => {
-        bleManager.setOnBleStateChanged((powered: boolean) => {
-            log.info(`BLE state change received: ${powered ? 'ON' : 'OFF'}`);
-            setBleReady(powered);
+            if (message.isPrivate && message.senderPeerID) {
+                const stored: StoredMessage = {
+                    id: message.id,
+                    sender: message.sender,
+                    content: message.content,
+                    timestamp: message.timestamp,
+                    isPrivate: true,
+                    senderPeerID: message.senderPeerID,
+                    isMine: false,
+                    status: 'delivered',
+                };
+                saveMessage(stored);
 
-            if (powered) {
-                // BLE just came back on — start mesh router if not already running
-                if (!meshRouter.getIsRunning()) {
-                    meshRouter.start().catch((err) => {
-                        log.error('Failed to restart mesh router:', err);
-                    });
+                upsertConversation({
+                    peerId: message.senderPeerID,
+                    peerName: message.sender,
+                    lastMessage: message.content,
+                    lastMessageTimestamp: message.timestamp,
+                    unreadCount: 1,
+                    updatedAt: Date.now(),
+                });
+
+                setConversations(dbGetConversations());
+                setMessageVersion((v) => v + 1);
+
+                if (isBackgrounded && notificationsEnabledRef.current) {
+                    notifyIncomingMessage(message.sender, message.content);
                 }
+            } else if (!message.isPrivate && message.channel) {
+                // Channel message
+                const stored: StoredMessage = {
+                    id: message.id,
+                    sender: message.sender,
+                    content: message.content,
+                    timestamp: message.timestamp,
+                    isPrivate: false,
+                    channel: message.channel,
+                    senderPeerID: message.senderPeerID,
+                    isMine: false,
+                    status: 'delivered',
+                };
+                saveMessage(stored);
+
+                upsertChannel({
+                    name: message.channel,
+                    isPasswordProtected: false,
+                    createdAt: Date.now(),
+                    lastMessage: message.content,
+                    lastMessageSender: message.sender,
+                    lastMessageTimestamp: message.timestamp,
+                    unreadCount: 1,
+                    updatedAt: Date.now(),
+                });
+
+                setChannels(dbGetChannels());
+                setMessageVersion((v) => v + 1);
+
+                if (isBackgrounded && notificationsEnabledRef.current) {
+                    notifyIncomingMessage(message.sender, message.content, message.channel);
+                }
+            }
+        });
+
+        // Peer connected
+        const peerConnSub = BitchatAPI.addPeerConnectedListener(({ peerID, nickname: peerNick }) => {
+            log.info(`Peer connected: ${peerNick} (${peerID})`);
+            setPeers((prev) => ({ ...prev, [peerID]: peerNick }));
+        });
+
+        // Peer disconnected
+        const peerDiscSub = BitchatAPI.addPeerDisconnectedListener(({ peerID, nickname: peerNick }) => {
+            log.info(`Peer disconnected: ${peerNick} (${peerID})`);
+            setPeers((prev) => {
+                const next = { ...prev };
+                delete next[peerID];
+                return next;
+            });
+        });
+
+        // Peer list updated (full sync)
+        const peerListSub = BitchatAPI.addPeerListUpdatedListener(() => {
+            BitchatAPI.getConnectedPeers().then((peerMap) => {
+                setPeers(peerMap);
+            }).catch(() => {});
+        });
+
+        // Delivery ack
+        const ackSub = BitchatAPI.addDeliveryAckListener((ack) => {
+            log.info(`Delivery ack for ${ack.originalMessageID}`);
+            updateMessageStatus(ack.originalMessageID, 'delivered');
+            setMessageVersion((v) => v + 1);
+        });
+
+        // Delivery status updates
+        const statusSub = BitchatAPI.addDeliveryStatusUpdateListener(({ messageID, status }) => {
+            if (status.type === 'delivered' || status.type === 'read' || status.type === 'failed' || status.type === 'sent') {
+                updateMessageStatus(messageID, status.type);
+                setMessageVersion((v) => v + 1);
+            }
+        });
+
+        subscriptionsRef.current = [msgSub, peerConnSub, peerDiscSub, peerListSub, ackSub, statusSub];
+    }, []);
+
+    const startMesh = useCallback(async () => {
+        const name = settings.displayName || nickname;
+        if (!name) {
+            log.warn('Cannot start mesh: no display name set');
+            return;
+        }
+
+        // Ensure BLE permissions before starting
+        const permStatus = await requestBluetoothPermissions();
+        if (permStatus !== 'granted') {
+            log.warn(`Bluetooth permissions ${permStatus}, cannot start mesh`);
+            return;
+        }
+
+        // Request notification permissions (non-blocking)
+        requestNotificationPermissions().catch(() => {});
+
+        try {
+            setupListeners();
+            const started = await BitchatAPI.startServices(name);
+            if (started) {
+                setIsRunning(true);
+                log.info(`Mesh started as "${name}"`);
+                const peerMap = await BitchatAPI.getConnectedPeers();
+                setPeers(peerMap);
             } else {
-                // BLE just turned off — clean up
-                meshRouter.stop();
-                setIsScanning(false);
-                setPeers([]);
+                log.warn('BitchatAPI.startServices returned false');
             }
-        });
-
-        return () => {
-            bleManager.setOnBleStateChanged(null);
-        };
-    }, []);
-
-    // ─── Peer Updates ────────────────────────────────────────
-
-    useEffect(() => {
-        peerManager.setOnChange((updatedPeers) => {
-            setPeers([...updatedPeers]);
-        });
-
-        return () => {
-            peerManager.setOnChange(null);
-        };
-    }, []);
-
-    // ─── Message Received ────────────────────────────────────
-
-    useEffect(() => {
-        const handler: OnMessageReceivedCallback = (msg, decrypted, sender) => {
-            // Refresh conversations when a message arrives
-            refreshConversations();
-        };
-
-        meshRouter.setOnMessageReceived(handler);
-        return () => meshRouter.setOnMessageReceived(null);
-    }, []);
-
-    // ─── Scanning ────────────────────────────────────────────
-
-    const startScanning = useCallback(async () => {
-        // Ensure BLE and mesh router are initialized before scanning
-        if (!bleManager.isBleAvailable()) {
-            const ready = await initBle();
-            if (!ready) {
-                log.warn('Cannot scan: BLE not available');
-                return;
-            }
+        } catch (error) {
+            log.error('Failed to start mesh:', error);
         }
-        if (!meshRouter.getIsRunning()) {
-            await meshRouter.start();
-        }
-        setIsScanning(true);
-        await meshRouter.startScanning();
-    }, [initBle]);
+    }, [nickname, settings.displayName, setupListeners]);
 
-    const stopScanning = useCallback(() => {
-        meshRouter.stopScanning();
-        setIsScanning(false);
+    const stopMesh = useCallback(async () => {
+        try {
+            await BitchatAPI.stopServices();
+            subscriptionsRef.current.forEach((s) => s.remove());
+            subscriptionsRef.current = [];
+            setIsRunning(false);
+            setPeers({});
+            log.info('Mesh stopped');
+        } catch (error) {
+            log.error('Failed to stop mesh:', error);
+        }
     }, []);
+
+    // Auto-start mesh once initialized and we have a display name
+    useEffect(() => {
+        if (isInitialised && settings.displayName && !isRunning) {
+            startMesh();
+        }
+    }, [isInitialised, settings.displayName]);
 
     // ─── Conversations ──────────────────────────────────────
 
     const refreshConversations = useCallback(() => {
         setConversations(dbGetConversations());
+        setChannels(dbGetChannels());
     }, []);
-
-    // ─── Messaging ───────────────────────────────────────────
-
-    const sendMessage = useCallback(
-        async (recipientId: string, recipientPublicKey: string, text: string) => {
-            try {
-                await meshRouter.sendTextMessage(recipientId, recipientPublicKey, text);
-                refreshConversations();
-            } catch (error) {
-                log.error('Failed to send message:', error);
-                throw error; // Re-throw so caller (UI) can handle it, but it won't crash unhandled
-            }
-        },
-        [refreshConversations]
-    );
-
-    const getMessagesForPeer = useCallback(
-        (peerId: string): SerializedMessage[] => {
-            const id = getCachedIdentity();
-            if (!id) return [];
-            return getMessages(peerId, id.id);
-        },
-        [identity]
-    );
-
-    const markRead = useCallback((peerId: string) => {
-        markConversationRead(peerId);
-        refreshConversations();
-    }, [refreshConversations]);
 
     useEffect(() => {
         if (isInitialised) {
@@ -253,25 +312,166 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         }
     }, [isInitialised, refreshConversations]);
 
+    // ─── Messaging ───────────────────────────────────────────
+
+    const sendPrivateMessage = useCallback(
+        async (recipientPeerID: string, recipientNickname: string, text: string) => {
+            try {
+                await BitchatAPI.sendPrivateMessage(text, recipientPeerID, recipientNickname);
+
+                const stored: StoredMessage = {
+                    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                    sender: settings.displayName || nickname,
+                    content: text,
+                    timestamp: Date.now(),
+                    isPrivate: true,
+                    senderPeerID: recipientPeerID,
+                    channel: recipientNickname,
+                    isMine: true,
+                    status: 'sent',
+                };
+                saveMessage(stored);
+
+                upsertConversation({
+                    peerId: recipientPeerID,
+                    peerName: recipientNickname,
+                    lastMessage: text,
+                    lastMessageTimestamp: stored.timestamp,
+                    unreadCount: 0,
+                    updatedAt: Date.now(),
+                });
+
+                refreshConversations();
+                setMessageVersion((v) => v + 1);
+            } catch (error) {
+                log.error('Failed to send message:', error);
+                throw error;
+            }
+        },
+        [nickname, settings.displayName, refreshConversations]
+    );
+
+    const getMessagesForPeer = useCallback(
+        (peerNickname: string): StoredMessage[] => {
+            return getPrivateMessages(peerNickname, settings.displayName || nickname);
+        },
+        [nickname, settings.displayName]
+    );
+
+    const markRead = useCallback((peerId: string) => {
+        markConversationRead(peerId);
+        refreshConversations();
+    }, [refreshConversations]);
+
+    // ─── Channels ────────────────────────────────────────────
+
+    const sendChannelMessage = useCallback(
+        async (channelName: string, text: string, mentions: string[] = []) => {
+            try {
+                await BitchatAPI.sendMessage(text, mentions, channelName);
+
+                const stored: StoredMessage = {
+                    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                    sender: settings.displayName || nickname,
+                    content: text,
+                    timestamp: Date.now(),
+                    isPrivate: false,
+                    channel: channelName,
+                    isMine: true,
+                    status: 'sent',
+                };
+                saveMessage(stored);
+
+                upsertChannel({
+                    name: channelName,
+                    isPasswordProtected: false,
+                    createdAt: Date.now(),
+                    lastMessage: text,
+                    lastMessageSender: settings.displayName || nickname,
+                    lastMessageTimestamp: stored.timestamp,
+                    unreadCount: 0,
+                    updatedAt: Date.now(),
+                });
+
+                refreshConversations();
+                setMessageVersion((v) => v + 1);
+            } catch (error) {
+                log.error('Failed to send channel message:', error);
+                throw error;
+            }
+        },
+        [nickname, settings.displayName, refreshConversations]
+    );
+
+    const getChannelMessagesHandler = useCallback(
+        (channelName: string): StoredMessage[] => {
+            return dbGetChannelMessages(channelName);
+        },
+        []
+    );
+
+    const joinChannel = useCallback((channelName: string, _password?: string) => {
+        upsertChannel({
+            name: channelName,
+            isPasswordProtected: false,
+            createdAt: Date.now(),
+            lastMessage: '',
+            lastMessageSender: '',
+            lastMessageTimestamp: 0,
+            unreadCount: 0,
+            updatedAt: Date.now(),
+        });
+        refreshConversations();
+    }, [refreshConversations]);
+
+    const leaveChannel = useCallback((channelName: string) => {
+        dbDeleteChannel(channelName);
+        refreshConversations();
+    }, [refreshConversations]);
+
+    const setChannelPasswordHandler = useCallback(
+        async (channelName: string, password?: string) => {
+            await BitchatAPI.setChannelPassword(channelName, password);
+        },
+        []
+    );
+
+    const markChannelReadHandler = useCallback((channelName: string) => {
+        markChannelRead(channelName);
+        refreshConversations();
+    }, [refreshConversations]);
+
+    // ─── Search & Delete ─────────────────────────────────────
+
+    const searchMessagesHandler = useCallback(
+        (query: string): StoredMessage[] => dbSearchMessages(query),
+        []
+    );
+
+    const deleteMessageHandler = useCallback(
+        (messageId: string): boolean => {
+            const deleted = dbDeleteMessage(messageId);
+            if (deleted) {
+                setMessageVersion((v) => v + 1);
+            }
+            return deleted;
+        },
+        []
+    );
+
     // ─── Settings ────────────────────────────────────────────
 
     const updateSettingsHandler = useCallback(
         (update: Partial<AppSettings>) => {
             saveSettings(update);
-            setSettings(getSettings());
-            if (update.displayName && identity) {
-                updateDisplayName(update.displayName);
-                setIdentity({ ...identity, displayName: update.displayName });
+            const newSettings = getSettings();
+            setSettings(newSettings);
+            if (update.displayName) {
+                setNickname(update.displayName);
             }
         },
-        [identity]
+        []
     );
-
-    // ─── Connect ─────────────────────────────────────────────
-
-    const connectToPeer = useCallback(async (deviceId: string): Promise<boolean> => {
-        return bleManager.connectToDevice(deviceId);
-    }, []);
 
     // ─── AppState Lifecycle ──────────────────────────────────
 
@@ -283,74 +483,84 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 appStateRef.current.match(/active/) &&
                 nextState.match(/inactive|background/)
             ) {
-                // Going to background — stop scanning to save battery
-                log.info('App backgrounded, pausing scan');
-                meshRouter.stopScanning();
-                setIsScanning(false);
+                log.info('App backgrounded');
             } else if (
                 appStateRef.current.match(/inactive|background/) &&
                 nextState === 'active'
             ) {
-                // Coming back to foreground — force check BLE state in case 
-                // the persistent listener missed it while backgrounded.
-                log.info('App foregrounded, syncing BLE state');
-                bleManager.checkState().catch((err) => log.warn('checkState failed:', err));
+                log.info('App foregrounded, syncing peers');
+                if (isRunning) {
+                    BitchatAPI.getConnectedPeers().then((peerMap) => {
+                        setPeers(peerMap);
+                    }).catch(() => {});
+                }
             }
             appStateRef.current = nextState;
         });
 
         return () => subscription.remove();
-    }, []);
+    }, [isRunning]);
 
     // ─── Cleanup ─────────────────────────────────────────────
 
     useEffect(() => {
         return () => {
-            meshRouter.stop();
-            bleManager.destroy();
-            peerManager.clear();
+            subscriptionsRef.current.forEach((s) => s.remove());
+            BitchatAPI.stopServices().catch(() => {});
         };
     }, []);
 
     // ─── Provide ─────────────────────────────────────────────
 
     const value: MeshContextType = React.useMemo(() => ({
-        identity,
+        nickname,
         isInitialised,
         peers,
-        connectedPeerCount: peers.filter((p) => p.connectionState === 'connected').length,
-        isScanning,
-        startScanning,
-        stopScanning,
-        sendMessage,
+        connectedPeerCount: Object.keys(peers).length,
+        isRunning,
+        startMesh,
+        stopMesh,
+        sendPrivateMessage,
         getMessagesForPeer,
         markRead,
         conversations,
         refreshConversations,
+        channels,
+        sendChannelMessage,
+        getChannelMessages: getChannelMessagesHandler,
+        joinChannel,
+        leaveChannel,
+        setChannelPassword: setChannelPasswordHandler,
+        markChannelRead: markChannelReadHandler,
+        messageVersion,
+        searchMessages: searchMessagesHandler,
+        deleteMessage: deleteMessageHandler,
         settings,
         updateSettings: updateSettingsHandler,
-        connectToPeer,
-        initBle,
-        requestEnableBle,
-        bleReady,
     }), [
-        identity,
+        nickname,
         isInitialised,
         peers,
-        isScanning,
-        startScanning,
-        stopScanning,
-        sendMessage,
+        isRunning,
+        startMesh,
+        stopMesh,
+        sendPrivateMessage,
         getMessagesForPeer,
         markRead,
         conversations,
         refreshConversations,
+        channels,
+        sendChannelMessage,
+        getChannelMessagesHandler,
+        joinChannel,
+        leaveChannel,
+        setChannelPasswordHandler,
+        markChannelReadHandler,
+        messageVersion,
+        searchMessagesHandler,
+        deleteMessageHandler,
         settings,
         updateSettingsHandler,
-        connectToPeer,
-        initBle,
-        requestEnableBle,
-        bleReady
     ]);
 
     return (

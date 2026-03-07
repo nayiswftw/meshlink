@@ -1,26 +1,24 @@
 /**
- * Database — Local storage for messages, peers, and conversations.
+ * Database — Local storage for messages and conversations.
  *
- * Uses AsyncStorage for persistence. Data is JSON-serialised.
- * Keeps an in-memory cache for synchronous reads with async persistence.
+ * Uses AsyncStorage for persistence with in-memory cache for sync reads.
+ * expo-bitchat handles peer management and relay natively.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../Logger';
-import type { SerializedMessage, PeerRecord, Conversation } from '../../types';
+import type { StoredMessage, Conversation, Channel } from '../../types';
 
 const log = createLogger('DB');
 
 // ─── Keys ────────────────────────────────────────────────────────
 const MESSAGES_KEY = '@meshlink/messages';
-const PEERS_KEY = '@meshlink/peers';
 const CONVERSATIONS_KEY = '@meshlink/conversations';
-const RELAY_CACHE_KEY = '@meshlink/relay_cache';
+const CHANNELS_KEY = '@meshlink/channels';
 
-// ─── In-memory cache (sync access, async persistence) ────────────
-let messagesCache: SerializedMessage[] = [];
-let peersCache: PeerRecord[] = [];
+// ─── In-memory cache ─────────────────────────────────────────────
+let messagesCache: StoredMessage[] = [];
 let conversationsCache: Conversation[] = [];
-let relayCacheData: SerializedMessage[] = [];
+let channelsCache: Channel[] = [];
 let isHydrated = false;
 
 // ─── Hydration ───────────────────────────────────────────────────
@@ -28,33 +26,25 @@ let isHydrated = false;
 export async function hydrateDatabase(): Promise<void> {
     if (isHydrated) return;
     try {
-        const [msgs, peers, convs, relay] = await Promise.all([
+        const [msgs, convs, chans] = await Promise.all([
             AsyncStorage.getItem(MESSAGES_KEY),
-            AsyncStorage.getItem(PEERS_KEY),
             AsyncStorage.getItem(CONVERSATIONS_KEY),
-            AsyncStorage.getItem(RELAY_CACHE_KEY),
+            AsyncStorage.getItem(CHANNELS_KEY),
         ]);
         messagesCache = msgs ? JSON.parse(msgs) : [];
-        peersCache = peers ? JSON.parse(peers) : [];
         conversationsCache = convs ? JSON.parse(convs) : [];
-        relayCacheData = relay ? JSON.parse(relay) : [];
+        channelsCache = chans ? JSON.parse(chans) : [];
     } catch (e) {
         log.warn('Hydration error:', e);
     }
     isHydrated = true;
 }
 
-// ─── Persist helpers (fire-and-forget) ───────────────────────────
+// ─── Persist helpers ─────────────────────────────────────────────
 
 function persistMessages() {
     AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(messagesCache)).catch((e) => {
         log.error('Failed to persist messages:', e);
-    });
-}
-
-function persistPeers() {
-    AsyncStorage.setItem(PEERS_KEY, JSON.stringify(peersCache)).catch((e) => {
-        log.error('Failed to persist peers:', e);
     });
 }
 
@@ -64,15 +54,9 @@ function persistConversations() {
     });
 }
 
-function persistRelayCache() {
-    AsyncStorage.setItem(RELAY_CACHE_KEY, JSON.stringify(relayCacheData)).catch((e) => {
-        log.error('Failed to persist relay cache:', e);
-    });
-}
-
 // ─── Messages ────────────────────────────────────────────────────
 
-export function saveMessage(msg: SerializedMessage): void {
+export function saveMessage(msg: StoredMessage): void {
     const idx = messagesCache.findIndex((m) => m.id === msg.id);
     if (idx >= 0) {
         messagesCache[idx] = msg;
@@ -82,64 +66,27 @@ export function saveMessage(msg: SerializedMessage): void {
     persistMessages();
 }
 
-export function getMessages(peerId: string, myId: string): SerializedMessage[] {
+export function getMessagesForPeer(peerId: string): StoredMessage[] {
+    return messagesCache
+        .filter((m) => m.senderPeerID === peerId || (m.isMine && m.channel === peerId))
+        .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+export function getPrivateMessages(peerNickname: string, myNickname: string): StoredMessage[] {
     return messagesCache
         .filter(
             (m) =>
-                (m.senderId === myId && m.recipientId === peerId) ||
-                (m.senderId === peerId && m.recipientId === myId)
+                m.isPrivate &&
+                ((m.sender === peerNickname && !m.isMine) || (m.sender === myNickname && m.isMine && m.channel === peerNickname))
         )
         .sort((a, b) => a.timestamp - b.timestamp);
 }
 
-export function getMessageById(id: string): SerializedMessage | null {
-    return messagesCache.find((m) => m.id === id) ?? null;
-}
-
-export function updateMessageStatus(id: string, status: string): void {
+export function updateMessageStatus(id: string, status: StoredMessage['status']): void {
     const idx = messagesCache.findIndex((m) => m.id === id);
     if (idx >= 0) {
         messagesCache[idx] = { ...messagesCache[idx], status };
         persistMessages();
-    }
-}
-
-export function deleteConversationMessages(peerId: string, myId: string): void {
-    messagesCache = messagesCache.filter(
-        (m) =>
-            !(
-                (m.senderId === myId && m.recipientId === peerId) ||
-                (m.senderId === peerId && m.recipientId === myId)
-            )
-    );
-    persistMessages();
-}
-
-// ─── Peers ───────────────────────────────────────────────────────
-
-export function savePeer(peer: PeerRecord): void {
-    const idx = peersCache.findIndex((p) => p.id === peer.id);
-    if (idx >= 0) {
-        peersCache[idx] = peer;
-    } else {
-        peersCache.push(peer);
-    }
-    persistPeers();
-}
-
-export function getPeer(id: string): PeerRecord | null {
-    return peersCache.find((p) => p.id === id) ?? null;
-}
-
-export function getAllPeers(): PeerRecord[] {
-    return [...peersCache];
-}
-
-export function updatePeerLastSeen(id: string): void {
-    const idx = peersCache.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-        peersCache[idx] = { ...peersCache[idx], lastSeen: Date.now() };
-        persistPeers();
     }
 }
 
@@ -148,13 +95,12 @@ export function updatePeerLastSeen(id: string): void {
 export function upsertConversation(conv: Conversation): void {
     const idx = conversationsCache.findIndex((c) => c.peerId === conv.peerId);
     if (idx >= 0) {
-        // Increment unread count instead of replacing it
         const existing = conversationsCache[idx];
         conversationsCache[idx] = {
             ...conv,
             unreadCount: conv.unreadCount > 0
                 ? existing.unreadCount + conv.unreadCount
-                : conv.unreadCount, // allow explicit reset to 0
+                : conv.unreadCount,
         };
     } else {
         conversationsCache.push(conv);
@@ -166,10 +112,6 @@ export function getConversations(): Conversation[] {
     return [...conversationsCache].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export function getConversation(peerId: string): Conversation | null {
-    return conversationsCache.find((c) => c.peerId === peerId) ?? null;
-}
-
 export function markConversationRead(peerId: string): void {
     const idx = conversationsCache.findIndex((c) => c.peerId === peerId);
     if (idx >= 0) {
@@ -178,44 +120,74 @@ export function markConversationRead(peerId: string): void {
     }
 }
 
-export function deleteConversation(peerId: string): void {
-    conversationsCache = conversationsCache.filter((c) => c.peerId !== peerId);
-    persistConversations();
+// ─── Channels ────────────────────────────────────────────────────
+
+function persistChannels() {
+    AsyncStorage.setItem(CHANNELS_KEY, JSON.stringify(channelsCache)).catch((e) => {
+        log.error('Failed to persist channels:', e);
+    });
 }
 
-// ─── Relay Cache ─────────────────────────────────────────────────
+export function upsertChannel(channel: Channel): void {
+    const idx = channelsCache.findIndex((c) => c.name === channel.name);
+    if (idx >= 0) {
+        const existing = channelsCache[idx];
+        channelsCache[idx] = {
+            ...channel,
+            createdAt: existing.createdAt,
+            unreadCount: channel.unreadCount > 0
+                ? existing.unreadCount + channel.unreadCount
+                : channel.unreadCount,
+        };
+    } else {
+        channelsCache.push(channel);
+    }
+    persistChannels();
+}
 
-const RELAY_CACHE_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
-const RELAY_CACHE_MAX_SIZE = 200;
+export function getChannels(): Channel[] {
+    return [...channelsCache].sort((a, b) => b.updatedAt - a.updatedAt);
+}
 
-export function addToRelayCache(msg: SerializedMessage): void {
-    if (!relayCacheData.find((m) => m.id === msg.id)) {
-        relayCacheData.push(msg);
-        // Enforce size limit — remove oldest entries
-        if (relayCacheData.length > RELAY_CACHE_MAX_SIZE) {
-            relayCacheData = relayCacheData.slice(-RELAY_CACHE_MAX_SIZE);
-        }
-        persistRelayCache();
+export function getChannel(name: string): Channel | undefined {
+    return channelsCache.find((c) => c.name === name);
+}
+
+export function markChannelRead(channelName: string): void {
+    const idx = channelsCache.findIndex((c) => c.name === channelName);
+    if (idx >= 0) {
+        channelsCache[idx] = { ...channelsCache[idx], unreadCount: 0 };
+        persistChannels();
     }
 }
 
-export function getRelayCache(): SerializedMessage[] {
-    // Evict expired entries on read
-    const now = Date.now();
-    const before = relayCacheData.length;
-    relayCacheData = relayCacheData.filter(
-        (m) => now - m.timestamp < RELAY_CACHE_EXPIRY_MS
-    );
-    if (relayCacheData.length !== before) persistRelayCache();
-    return [...relayCacheData];
+export function deleteChannel(channelName: string): void {
+    channelsCache = channelsCache.filter((c) => c.name !== channelName);
+    persistChannels();
 }
 
-export function removeFromRelayCache(messageId: string): void {
-    relayCacheData = relayCacheData.filter((m) => m.id !== messageId);
-    persistRelayCache();
+export function getChannelMessages(channelName: string): StoredMessage[] {
+    return messagesCache
+        .filter((m) => !m.isPrivate && m.channel === channelName)
+        .sort((a, b) => a.timestamp - b.timestamp);
 }
 
-export function clearRelayCache(): void {
-    relayCacheData = [];
-    persistRelayCache();
+// ─── Search ──────────────────────────────────────────────────────
+
+export function searchMessages(query: string): StoredMessage[] {
+    if (!query.trim()) return [];
+    const lower = query.toLowerCase();
+    return messagesCache
+        .filter((m) => m.content.toLowerCase().includes(lower))
+        .sort((a, b) => b.timestamp - a.timestamp);
+}
+
+// ─── Delete ──────────────────────────────────────────────────────
+
+export function deleteMessage(messageId: string): boolean {
+    const idx = messagesCache.findIndex((m) => m.id === messageId);
+    if (idx < 0) return false;
+    messagesCache.splice(idx, 1);
+    persistMessages();
+    return true;
 }

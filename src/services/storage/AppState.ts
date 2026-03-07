@@ -42,7 +42,7 @@ export function getSettings(): AppSettings {
 
 export function saveSettings(settings: Partial<AppSettings>): void {
     settingsCache = { ...settingsCache, ...settings };
-    AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsCache)).catch(() => { });
+    AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsCache)).catch(() => {});
 }
 
 // ─── Onboarding ──────────────────────────────────────────────────
@@ -53,5 +53,5 @@ export function isOnboardingComplete(): boolean {
 
 export function setOnboardingComplete(): void {
     onboardingComplete = true;
-    AsyncStorage.setItem(ONBOARDING_KEY, 'true').catch(() => { });
+    AsyncStorage.setItem(ONBOARDING_KEY, 'true').catch(() => {});
 }

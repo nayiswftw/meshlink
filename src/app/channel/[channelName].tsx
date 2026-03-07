@@ -1,6 +1,6 @@
 /**
- * Chat screen — Full conversation view with a specific peer.
- * expo-bitchat handles encryption/decryption natively.
+ * Channel chat screen — Group conversation in a named channel.
+ * Uses expo-bitchat sendMessage for public channel messaging.
  */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
@@ -21,15 +21,16 @@ import ChatBubble from '../../components/ChatBubble';
 import { peerColor } from '../../constants';
 import type { StoredMessage } from '../../types';
 
-export default function ChatScreen() {
-    const { peerId } = useLocalSearchParams<{ peerId: string }>();
+export default function ChannelChatScreen() {
+    const { channelName } = useLocalSearchParams<{ channelName: string }>();
+    const decodedName = channelName ? decodeURIComponent(channelName) : '';
+
     const {
         nickname,
-        getMessagesForPeer,
-        sendPrivateMessage,
-        markRead,
-        peers,
-        refreshConversations,
+        getChannelMessages,
+        sendChannelMessage,
+        markChannelRead: markRead,
+        connectedPeerCount,
         messageVersion,
         deleteMessage,
     } = useMesh();
@@ -40,22 +41,16 @@ export default function ChatScreen() {
     const [isSending, setIsSending] = useState(false);
     const flatListRef = useRef<FlatList>(null);
 
-    // Get peer info from the PeerInfo map
-    const peerNickname = peerId ? (peers[peerId] ?? 'Unknown') : 'Unknown';
-    const color = peerColor(peerId || '');
-    const isConnected = peerId ? peerId in peers : false;
-
-    // Load messages
     const loadMessages = useCallback(() => {
-        if (!peerNickname || peerNickname === 'Unknown') return;
-        const msgs = getMessagesForPeer(peerNickname);
+        if (!decodedName) return;
+        const msgs = getChannelMessages(decodedName);
         setMessages(msgs);
-    }, [peerNickname, getMessagesForPeer]);
+    }, [decodedName, getChannelMessages]);
 
     useEffect(() => {
         loadMessages();
-        if (peerId) markRead(peerId);
-    }, [peerId, loadMessages, markRead]);
+        if (decodedName) markRead(decodedName);
+    }, [decodedName, loadMessages, markRead]);
 
     // Refresh when new messages arrive via context
     useEffect(() => {
@@ -68,21 +63,23 @@ export default function ChatScreen() {
     }, [deleteMessage, loadMessages]);
 
     const handleSend = async () => {
-        if (!input.trim() || !peerId || isSending) return;
+        if (!input.trim() || !decodedName || isSending) return;
 
         const text = input.trim();
         setInput('');
         setIsSending(true);
 
         try {
-            await sendPrivateMessage(peerId, peerNickname, text);
+            await sendChannelMessage(decodedName, text);
             loadMessages();
-        } catch (error) {
+        } catch {
             showToast('Failed to send message', 'error');
         } finally {
             setIsSending(false);
         }
     };
+
+    const channelColor = peerColor(decodedName);
 
     return (
         <SafeAreaView className="flex-1 bg-[#FAF6F1]" style={{ flex: 1, backgroundColor: '#FAF6F1' }}>
@@ -92,21 +89,16 @@ export default function ChatScreen() {
                         <View className="flex-row items-center">
                             <View
                                 className="w-8 h-8 rounded-full items-center justify-center mr-2.5"
-                                style={{ backgroundColor: color + '20' }}
+                                style={{ backgroundColor: channelColor + '20' }}
                             >
-                                <Text className="text-xs font-bold" style={{ color }}>
-                                    {peerNickname.slice(0, 2).toUpperCase() || '??'}
-                                </Text>
+                                <Ionicons name="chatbubbles" size={16} color={channelColor} />
                             </View>
                             <View>
                                 <Text className="text-[#2C2C2C] font-semibold text-base">
-                                    {peerNickname}
+                                    {decodedName}
                                 </Text>
-                                <Text
-                                    className={`text-[11px] ${isConnected ? 'text-[#4A7C59]' : 'text-[#A0977D]'
-                                        }`}
-                                >
-                                    {isConnected ? 'Connected' : 'Offline'}
+                                <Text className="text-[11px] text-[#A0977D]">
+                                    {connectedPeerCount} peer{connectedPeerCount !== 1 ? 's' : ''} in mesh
                                 </Text>
                             </View>
                         </View>
@@ -141,24 +133,35 @@ export default function ChatScreen() {
                     ListEmptyComponent={
                         <View className="items-center">
                             <Ionicons
-                                name="chatbubble-ellipses-outline"
+                                name="chatbubbles-outline"
                                 size={48}
                                 color="#D9D2C7"
                             />
                             <Text className="text-[#A0977D] text-sm mt-3">
-                                Send the first message!
+                                Start the conversation in {decodedName}
                             </Text>
                         </View>
                     }
                     renderItem={({ item }) => (
-                        <ChatBubble
-                            content={item.content}
-                            timestamp={item.timestamp}
-                            isMine={item.isMine}
-                            status={item.isMine ? item.status : undefined}
-                            messageId={item.id}
-                            onDelete={handleDelete}
-                        />
+                        <View>
+                            {/* Show sender name for group messages */}
+                            {!item.isMine && (
+                                <Text
+                                    className="text-xs font-medium ml-1 mb-0.5"
+                                    style={{ color: peerColor(item.sender) }}
+                                >
+                                    {item.sender}
+                                </Text>
+                            )}
+                            <ChatBubble
+                                content={item.content}
+                                timestamp={item.timestamp}
+                                isMine={item.isMine}
+                                status={item.isMine ? item.status : undefined}
+                                messageId={item.id}
+                                onDelete={handleDelete}
+                            />
+                        </View>
                     )}
                 />
 
@@ -166,14 +169,14 @@ export default function ChatScreen() {
                 <View className="flex-row items-end px-4 py-3 border-t border-[#E8E2D9] bg-[#FAF6F1]">
                     <TextInput
                         className="flex-1 bg-white text-[#2C2C2C] rounded-2xl px-4 py-2.5 text-[15px] border border-[#E8E2D9] max-h-24"
-                        placeholder="Type a message…"
+                        placeholder={`Message ${decodedName}…`}
                         placeholderTextColor="#A0977D"
                         value={input}
                         onChangeText={setInput}
                         multiline
                         returnKeyType="default"
-                        accessibilityLabel="Message input"
-                        accessibilityHint="Type your message here"
+                        accessibilityLabel="Channel message input"
+                        accessibilityHint="Type your message for this channel"
                     />
                     <TouchableOpacity
                         onPress={handleSend}

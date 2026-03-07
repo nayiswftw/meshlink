@@ -13,17 +13,6 @@
       "output": "static"
     },
     "plugins": [
-      [
-        "react-native-ble-plx",
-        {
-          "isBackgroundEnabled": true,
-          "modes": [
-            "central",
-            "peripheral"
-          ],
-          "bluetoothAlwaysPermission": "Meshlink needs Bluetooth to communicate with nearby devices."
-        }
-      ],
       "expo-secure-store",
       [
         "expo-notifications",
@@ -31,8 +20,7 @@
           "color": "#6366F1"
         }
       ],
-      "expo-font",
-      "munim-bluetooth-peripheral"
+      "expo-font"
     ],
     "android": {
       "package": "com.meshlink.app",
@@ -59,7 +47,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "ea63e50f-31ae-495c-8a7e-6f8ed060117d"
+        "projectId": "7af64064-fbc3-4646-95f5-d29068574cb4"
       }
     }
   }

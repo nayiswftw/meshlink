@@ -1,7 +1,8 @@
 /**
- * Onboarding — First launch setup: identity generation, name input, BLE permissions.
+ * Onboarding — First launch setup: intro slides, BT permission, and name input.
+ * expo-bitchat handles BLE mesh networking natively.
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
     View,
     Text,
@@ -11,13 +12,13 @@ import {
     KeyboardAvoidingView,
     Platform,
     StatusBar,
-    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../context/MeshContext';
-import { setOnboardingComplete, saveSettings } from '../services/storage/AppState';
+import { setOnboardingComplete } from '../services/storage/AppState';
+import { requestBluetoothPermissions, type PermissionStatus } from '../services/Permissions';
 import RadarAnimation from '../components/RadarAnimation';
 
 const STEPS = [
@@ -41,25 +42,12 @@ const STEPS = [
 ];
 
 export default function OnboardingScreen() {
-    const { identity, updateSettings, bleReady, requestEnableBle } = useMesh();
+    const { nickname, updateSettings } = useMesh();
     const [step, setStep] = useState(0);
-    const [name, setName] = useState('');
-    const [bleGranted, setBleGranted] = useState(bleReady);
-    const [isLoading, setIsLoading] = useState(false);
+    const [name, setName] = useState(nickname || '');
+    const [permStatus, setPermStatus] = useState<PermissionStatus | null>(null);
     const fadeAnim = useRef(new Animated.Value(1)).current;
     const slideAnim = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-        if (identity) {
-            setName(identity.displayName);
-        }
-    }, [identity]);
-
-    // Reactively sync BLE state from context — if the user turns
-    // Bluetooth on/off from system settings, this updates immediately
-    useEffect(() => {
-        setBleGranted(bleReady);
-    }, [bleReady]);
 
     const animateTransition = (next: number) => {
         Animated.parallel([
@@ -95,23 +83,16 @@ export default function OnboardingScreen() {
         if (step < STEPS.length - 1) {
             animateTransition(step + 1);
         } else {
-            animateTransition(STEPS.length); // name input step
+            animateTransition(STEPS.length); // permission step
         }
     };
 
-    const handleGrantBle = async () => {
-        setIsLoading(true);
-        try {
-            await requestEnableBle();
-            // The UI will be reactively unlocked via bleReady once Bluetooth turns on.
-        } catch (error) {
-            Alert.alert(
-                'Bluetooth Error',
-                'Failed to initialize Bluetooth. Please check your device settings.',
-                [{ text: 'OK' }]
-            );
-        } finally {
-            setIsLoading(false);
+    const handlePermission = async () => {
+        const status = await requestBluetoothPermissions();
+        setPermStatus(status);
+        if (status === 'granted') {
+            // Auto-advance after a short delay so user sees the success state
+            setTimeout(() => animateTransition(STEPS.length + 1), 600);
         }
     };
 
@@ -126,8 +107,8 @@ export default function OnboardingScreen() {
     };
 
     const isIntroStep = step < STEPS.length;
-    const isNameStep = step === STEPS.length;
-    const isBleStep = step === STEPS.length + 1;
+    const isPermissionStep = step === STEPS.length;
+    const isNameStep = step === STEPS.length + 1;
 
     return (
         <SafeAreaView className="flex-1 bg-[#FAF6F1]" style={{ flex: 1, backgroundColor: '#FAF6F1' }}>
@@ -176,6 +157,51 @@ export default function OnboardingScreen() {
                             </>
                         )}
 
+                        {isPermissionStep && (
+                            <>
+                                <View className="w-20 h-20 rounded-full bg-[#E8EDDF] items-center justify-center mb-8">
+                                    <Ionicons name="bluetooth-outline" size={36} color="#5C6B3C" />
+                                </View>
+                                <Text
+                                    className="text-[#2C2C2C] text-2xl font-bold text-center mb-3"
+                                    style={{ color: '#2C2C2C' }}
+                                    accessibilityRole="header"
+                                >
+                                    Enable Bluetooth
+                                </Text>
+                                <Text
+                                    className="text-[#7A7A7A] text-sm text-center mb-8 max-w-xs"
+                                    style={{ color: '#7A7A7A' }}
+                                >
+                                    Meshlink needs Bluetooth to discover nearby devices and relay messages securely.
+                                </Text>
+                                {permStatus === 'granted' && (
+                                    <View className="flex-row items-center bg-[#E2EDD5] rounded-xl px-4 py-3 mb-4">
+                                        <Ionicons name="checkmark-circle" size={20} color="#4A7C59" />
+                                        <Text className="text-[#3D6B4A] text-sm font-medium ml-2">
+                                            Bluetooth permission granted
+                                        </Text>
+                                    </View>
+                                )}
+                                {permStatus === 'blocked' && (
+                                    <View className="flex-row items-center bg-[#FEF2F2] rounded-xl px-4 py-3 mb-4">
+                                        <Ionicons name="alert-circle" size={20} color="#B85C4A" />
+                                        <Text className="text-[#7F1D1D] text-sm font-medium ml-2">
+                                            Permission blocked — enable in device Settings
+                                        </Text>
+                                    </View>
+                                )}
+                                {permStatus === 'denied' && (
+                                    <View className="flex-row items-center bg-[#FEF2F2] rounded-xl px-4 py-3 mb-4">
+                                        <Ionicons name="alert-circle" size={20} color="#C4903D" />
+                                        <Text className="text-[#7F1D1D] text-sm font-medium ml-2">
+                                            Permission denied — tap below to try again
+                                        </Text>
+                                    </View>
+                                )}
+                            </>
+                        )}
+
                         {isNameStep && (
                             <>
                                 <View className="w-20 h-20 rounded-full bg-[#E8EDDF] items-center justify-center mb-8">
@@ -189,56 +215,13 @@ export default function OnboardingScreen() {
                                 </Text>
                                 <TextInput
                                     className="bg-white text-[#2C2C2C] text-base w-full rounded-xl px-4 py-3.5 border border-[#E8E2D9] text-center"
-                                    placeholder={identity?.displayName ?? 'Enter your name'}
+                                    placeholder="Enter your name"
                                     placeholderTextColor="#A0977D"
                                     value={name}
                                     onChangeText={setName}
                                     maxLength={20}
                                     autoFocus
                                 />
-                            </>
-                        )}
-
-                        {isBleStep && (
-                            <>
-                                <RadarAnimation isActive={bleGranted} size={160} />
-                                <Text className="text-[#2C2C2C] text-2xl font-bold text-center mb-3 mt-8" style={{ color: '#2C2C2C' }}>
-                                    Enable Bluetooth
-                                </Text>
-                                <Text className="text-[#7A7A7A] text-sm text-center mb-8 max-w-xs" style={{ color: '#7A7A7A' }}>
-                                    Meshlink needs Bluetooth to discover and communicate with
-                                    nearby devices
-                                </Text>
-                                {!bleGranted && (
-                                    <TouchableOpacity
-                                        onPress={handleGrantBle}
-                                        className="bg-[#5C6B3C] rounded-xl px-8 py-3.5"
-                                        disabled={isLoading}
-                                        style={{
-                                            shadowColor: '#5C6B3C',
-                                            shadowOffset: { width: 0, height: 2 },
-                                            shadowOpacity: 0.25,
-                                            shadowRadius: 8,
-                                            elevation: 4,
-                                        }}
-                                    >
-                                        <Text className="text-white font-semibold text-base" style={{ color: 'white' }}>
-                                            {isLoading ? 'Requesting…' : 'Grant Permission'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                )}
-                                {bleGranted && (
-                                    <View className="flex-row items-center">
-                                        <Ionicons
-                                            name="checkmark-circle"
-                                            size={20}
-                                            color="#4A7C59"
-                                        />
-                                        <Text className="text-[#4A7C59] ml-2 font-medium" style={{ color: '#4A7C59' }}>
-                                            Bluetooth ready!
-                                        </Text>
-                                    </View>
-                                )}
                             </>
                         )}
                     </Animated.View>
@@ -249,6 +232,8 @@ export default function OnboardingScreen() {
                     {isIntroStep && (
                         <TouchableOpacity
                             onPress={handleNext}
+                            accessibilityRole="button"
+                            accessibilityLabel={step === STEPS.length - 1 ? 'Get Started' : 'Next'}
                             className="bg-[#5C6B3C] rounded-xl py-4 items-center"
                             style={{
                                 shadowColor: '#5C6B3C',
@@ -263,9 +248,63 @@ export default function OnboardingScreen() {
                             </Text>
                         </TouchableOpacity>
                     )}
+                    {isPermissionStep && (
+                        <View>
+                            {permStatus !== 'granted' && (
+                                <TouchableOpacity
+                                    onPress={handlePermission}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Allow Bluetooth access"
+                                    className="bg-[#5C6B3C] rounded-xl py-4 items-center mb-3"
+                                    style={{
+                                        shadowColor: '#5C6B3C',
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.25,
+                                        shadowRadius: 8,
+                                        elevation: 4,
+                                    }}
+                                >
+                                    <Text className="text-white font-semibold text-base">
+                                        Allow Bluetooth
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
+                            <TouchableOpacity
+                                onPress={() => animateTransition(STEPS.length + 1)}
+                                accessibilityRole="button"
+                                accessibilityLabel={permStatus === 'granted' ? 'Continue' : 'Skip for now'}
+                                className={
+                                    permStatus === 'granted'
+                                        ? 'bg-[#5C6B3C] rounded-xl py-4 items-center'
+                                        : 'py-4 items-center'
+                                }
+                                style={
+                                    permStatus === 'granted'
+                                        ? {
+                                              shadowColor: '#5C6B3C',
+                                              shadowOffset: { width: 0, height: 2 },
+                                              shadowOpacity: 0.25,
+                                              shadowRadius: 8,
+                                              elevation: 4,
+                                          }
+                                        : undefined
+                                }
+                            >
+                                <Text
+                                    className={
+                                        permStatus === 'granted'
+                                            ? 'text-white font-semibold text-base'
+                                            : 'text-[#A0977D] text-sm'
+                                    }
+                                >
+                                    {permStatus === 'granted' ? 'Continue' : 'Skip for now'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
                     {isNameStep && (
                         <TouchableOpacity
-                            onPress={() => animateTransition(STEPS.length + 1)}
+                            onPress={handleFinish}
                             className={`rounded-xl py-4 items-center ${name.trim() ? 'bg-[#5C6B3C]' : 'bg-[#D9D2C7]'
                                 }`}
                             disabled={!name.trim()}
@@ -281,29 +320,7 @@ export default function OnboardingScreen() {
                                 className={`font-semibold text-base ${name.trim() ? 'text-white' : 'text-[#A0977D]'
                                     }`}
                             >
-                                Continue
-                            </Text>
-                        </TouchableOpacity>
-                    )}
-                    {isBleStep && (
-                        <TouchableOpacity
-                            onPress={handleFinish}
-                            disabled={!bleGranted}
-                            className={`rounded-xl py-4 items-center ${bleGranted ? 'bg-[#5C6B3C]' : 'bg-[#D9D2C7]'
-                                }`}
-                            style={bleGranted ? {
-                                shadowColor: '#5C6B3C',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: 0.25,
-                                shadowRadius: 8,
-                                elevation: 4,
-                            } : undefined}
-                        >
-                            <Text
-                                className={`font-semibold text-base ${bleGranted ? 'text-white' : 'text-[#7A7A7A]'
-                                    }`}
-                            >
-                                {bleGranted ? 'Enter Meshlink' : 'Enable Bluetooth to continue'}
+                                {name.trim() ? 'Enter Meshlink' : 'Enter a name to continue'}
                             </Text>
                         </TouchableOpacity>
                     )}

@@ -83,8 +83,8 @@ export default function SettingsScreen() {
     const handleStartMesh = async () => {
         try {
             await startMesh();
-        } catch {
-            showToast('Failed to start mesh service', 'error');
+        } catch (e) {
+            showToast(e instanceof Error ? e.message : 'Failed to start mesh service', 'error');
         }
     };
 

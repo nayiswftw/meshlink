@@ -120,6 +120,9 @@ export default function ChannelChatScreen() {
                     ref={flatListRef}
                     data={messages}
                     keyExtractor={(m) => m.id}
+                    initialNumToRender={20}
+                    maxToRenderPerBatch={15}
+                    windowSize={10}
                     contentContainerStyle={{
                         paddingHorizontal: 16,
                         paddingTop: 12,

@@ -20,6 +20,7 @@ let messagesCache: StoredMessage[] = [];
 let conversationsCache: Conversation[] = [];
 let channelsCache: Channel[] = [];
 let isHydrated = false;
+const MAX_MESSAGES = 5000;
 
 // ─── Hydration ───────────────────────────────────────────────────
 
@@ -40,18 +41,37 @@ export async function hydrateDatabase(): Promise<void> {
     isHydrated = true;
 }
 
-// ─── Persist helpers ─────────────────────────────────────────────
+// ─── Persist helpers (debounced to coalesce rapid writes) ────────
+
+let msgPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let convPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let chanPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function persistMessages() {
-    AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(messagesCache)).catch((e) => {
-        log.error('Failed to persist messages:', e);
-    });
+    if (msgPersistTimer) clearTimeout(msgPersistTimer);
+    msgPersistTimer = setTimeout(() => {
+        AsyncStorage.setItem(MESSAGES_KEY, JSON.stringify(messagesCache)).catch((e) => {
+            log.error('Failed to persist messages:', e);
+        });
+    }, 300);
 }
 
 function persistConversations() {
-    AsyncStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversationsCache)).catch((e) => {
-        log.error('Failed to persist conversations:', e);
-    });
+    if (convPersistTimer) clearTimeout(convPersistTimer);
+    convPersistTimer = setTimeout(() => {
+        AsyncStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversationsCache)).catch((e) => {
+            log.error('Failed to persist conversations:', e);
+        });
+    }, 300);
+}
+
+function persistChannels() {
+    if (chanPersistTimer) clearTimeout(chanPersistTimer);
+    chanPersistTimer = setTimeout(() => {
+        AsyncStorage.setItem(CHANNELS_KEY, JSON.stringify(channelsCache)).catch((e) => {
+            log.error('Failed to persist channels:', e);
+        });
+    }, 300);
 }
 
 // ─── Messages ────────────────────────────────────────────────────
@@ -62,23 +82,23 @@ export function saveMessage(msg: StoredMessage): void {
         messagesCache[idx] = msg;
     } else {
         messagesCache.push(msg);
+        // Prune oldest messages when over cap
+        if (messagesCache.length > MAX_MESSAGES) {
+            messagesCache.sort((a, b) => a.timestamp - b.timestamp);
+            messagesCache = messagesCache.slice(-MAX_MESSAGES);
+        }
     }
     persistMessages();
 }
 
-export function getMessagesForPeer(peerId: string): StoredMessage[] {
-    return messagesCache
-        .filter((m) => m.senderPeerID === peerId || (m.isMine && m.channel === peerId))
-        .sort((a, b) => a.timestamp - b.timestamp);
+/** Check whether a message ID already exists (for dedup). */
+export function hasMessage(id: string): boolean {
+    return messagesCache.some((m) => m.id === id);
 }
 
-export function getPrivateMessages(peerNickname: string, myNickname: string): StoredMessage[] {
+export function getPrivateMessagesForPeer(peerId: string): StoredMessage[] {
     return messagesCache
-        .filter(
-            (m) =>
-                m.isPrivate &&
-                ((m.sender === peerNickname && !m.isMine) || (m.sender === myNickname && m.isMine && m.channel === peerNickname))
-        )
+        .filter((m) => m.isPrivate && m.senderPeerID === peerId)
         .sort((a, b) => a.timestamp - b.timestamp);
 }
 
@@ -121,12 +141,6 @@ export function markConversationRead(peerId: string): void {
 }
 
 // ─── Channels ────────────────────────────────────────────────────
-
-function persistChannels() {
-    AsyncStorage.setItem(CHANNELS_KEY, JSON.stringify(channelsCache)).catch((e) => {
-        log.error('Failed to persist channels:', e);
-    });
-}
 
 export function upsertChannel(channel: Channel): void {
     const idx = channelsCache.findIndex((c) => c.name === channel.name);
@@ -187,7 +201,39 @@ export function searchMessages(query: string): StoredMessage[] {
 export function deleteMessage(messageId: string): boolean {
     const idx = messagesCache.findIndex((m) => m.id === messageId);
     if (idx < 0) return false;
+    const deleted = messagesCache[idx];
     messagesCache.splice(idx, 1);
     persistMessages();
+
+    // Update parent conversation/channel lastMessage
+    if (deleted.isPrivate && deleted.senderPeerID) {
+        const remaining = messagesCache
+            .filter((m) => m.isPrivate && m.senderPeerID === deleted.senderPeerID)
+            .sort((a, b) => b.timestamp - a.timestamp);
+        const convIdx = conversationsCache.findIndex((c) => c.peerId === deleted.senderPeerID);
+        if (convIdx >= 0) {
+            conversationsCache[convIdx] = {
+                ...conversationsCache[convIdx],
+                lastMessage: remaining[0]?.content ?? '',
+                lastMessageTimestamp: remaining[0]?.timestamp ?? 0,
+            };
+            persistConversations();
+        }
+    } else if (!deleted.isPrivate && deleted.channel) {
+        const remaining = messagesCache
+            .filter((m) => !m.isPrivate && m.channel === deleted.channel)
+            .sort((a, b) => b.timestamp - a.timestamp);
+        const chanIdx = channelsCache.findIndex((c) => c.name === deleted.channel);
+        if (chanIdx >= 0) {
+            channelsCache[chanIdx] = {
+                ...channelsCache[chanIdx],
+                lastMessage: remaining[0]?.content ?? '',
+                lastMessageSender: remaining[0]?.sender ?? '',
+                lastMessageTimestamp: remaining[0]?.timestamp ?? 0,
+            };
+            persistChannels();
+        }
+    }
+
     return true;
 }

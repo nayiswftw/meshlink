@@ -184,8 +184,8 @@ export default function ChatsScreen() {
         );
     }, [channels, searchQuery]);
 
-    const handleCreateOrJoin = (channelName: string, password?: string) => {
-        joinChannel(channelName, password);
+    const handleCreateOrJoin = async (channelName: string, password?: string) => {
+        await joinChannel(channelName, password);
         router.push(`/channel/${encodeURIComponent(channelName)}`);
     };
 

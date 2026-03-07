@@ -20,7 +20,8 @@ import type { BitchatMessage, PeerInfo, Subscription } from 'expo-bitchat';
 import { createLogger } from '../services/Logger';
 import {
     saveMessage,
-    getPrivateMessages,
+    hasMessage,
+    getPrivateMessagesForPeer,
     upsertConversation,
     getConversations as dbGetConversations,
     markConversationRead,
@@ -45,6 +46,18 @@ import type { AppSettings, Conversation, StoredMessage, Channel } from '../types
 
 const log = createLogger('MeshContext');
 
+/** Cryptographically-secure message ID. */
+function generateId(): string {
+    const bytes = new Uint8Array(8);
+    crypto.getRandomValues(bytes);
+    return `${Date.now()}-${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Strip control characters and zero-width unicode from display names. */
+function sanitizeDisplayName(raw: string): string {
+    return raw.replace(/[\x00-\x1F\x7F\u200B-\u200F\u2028-\u202F\uFEFF]/g, '').trim();
+}
+
 // ─── Context Shape ───────────────────────────────────────────────
 
 interface MeshContextType {
@@ -63,7 +76,7 @@ interface MeshContextType {
 
     // Messaging
     sendPrivateMessage: (recipientPeerID: string, recipientNickname: string, text: string) => Promise<void>;
-    getMessagesForPeer: (peerNickname: string) => StoredMessage[];
+    getMessagesForPeer: (peerId: string) => StoredMessage[];
     markRead: (peerId: string) => void;
 
     // Conversations
@@ -74,7 +87,7 @@ interface MeshContextType {
     channels: Channel[];
     sendChannelMessage: (channelName: string, text: string, mentions?: string[]) => Promise<void>;
     getChannelMessages: (channelName: string) => StoredMessage[];
-    joinChannel: (channelName: string, password?: string) => void;
+    joinChannel: (channelName: string, password?: string) => Promise<void>;
     leaveChannel: (channelName: string) => void;
     setChannelPassword: (channelName: string, password?: string) => Promise<void>;
     markChannelRead: (channelName: string) => void;
@@ -106,6 +119,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     const [messageVersion, setMessageVersion] = useState(0);
 
     const subscriptionsRef = useRef<Subscription[]>([]);
+    const appStateRef = useRef<AppStateStatus>(RNAppState.currentState);
     const notificationsEnabledRef = useRef(settings.notificationsEnabled);
 
     // Keep the ref in sync
@@ -140,6 +154,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         // Incoming messages
         const msgSub = BitchatAPI.addMessageListener((message: BitchatMessage) => {
             log.info(`Message from ${message.sender}: ${message.content.slice(0, 50)}`);
+
+            // Deduplicate — mesh networks may deliver the same message twice
+            if (hasMessage(message.id)) return;
+
             const isBackgrounded = appStateRef.current !== 'active';
 
             if (message.isPrivate && message.senderPeerID) {
@@ -249,15 +267,16 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     const startMesh = useCallback(async () => {
         const name = settings.displayName || nickname;
         if (!name) {
-            log.warn('Cannot start mesh: no display name set');
-            return;
+            throw new Error('No display name set. Please set your name in Settings.');
         }
 
-        // Ensure BLE permissions before starting
         const permStatus = await requestBluetoothPermissions();
         if (permStatus !== 'granted') {
-            log.warn(`Bluetooth permissions ${permStatus}, cannot start mesh`);
-            return;
+            throw new Error(
+                permStatus === 'blocked'
+                    ? 'Bluetooth permission blocked. Enable in device Settings.'
+                    : 'Bluetooth permission is required for mesh networking.',
+            );
         }
 
         // Request notification permissions (non-blocking)
@@ -266,16 +285,16 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         try {
             setupListeners();
             const started = await BitchatAPI.startServices(name);
-            if (started) {
-                setIsRunning(true);
-                log.info(`Mesh started as "${name}"`);
-                const peerMap = await BitchatAPI.getConnectedPeers();
-                setPeers(peerMap);
-            } else {
-                log.warn('BitchatAPI.startServices returned false');
+            if (!started) {
+                throw new Error('Mesh service failed to start. Please try again.');
             }
+            setIsRunning(true);
+            log.info(`Mesh started as "${name}"`);
+            const peerMap = await BitchatAPI.getConnectedPeers();
+            setPeers(peerMap);
         } catch (error) {
             log.error('Failed to start mesh:', error);
+            throw error instanceof Error ? error : new Error('Failed to start mesh.');
         }
     }, [nickname, settings.displayName, setupListeners]);
 
@@ -295,9 +314,9 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     // Auto-start mesh once initialized and we have a display name
     useEffect(() => {
         if (isInitialised && settings.displayName && !isRunning) {
-            startMesh();
+            startMesh().catch((e) => log.warn('Auto-start failed:', e));
         }
-    }, [isInitialised, settings.displayName]);
+    }, [isInitialised, settings.displayName, isRunning, startMesh]);
 
     // ─── Conversations ──────────────────────────────────────
 
@@ -320,13 +339,12 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 await BitchatAPI.sendPrivateMessage(text, recipientPeerID, recipientNickname);
 
                 const stored: StoredMessage = {
-                    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                    id: generateId(),
                     sender: settings.displayName || nickname,
                     content: text,
                     timestamp: Date.now(),
                     isPrivate: true,
                     senderPeerID: recipientPeerID,
-                    channel: recipientNickname,
                     isMine: true,
                     status: 'sent',
                 };
@@ -352,10 +370,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     );
 
     const getMessagesForPeer = useCallback(
-        (peerNickname: string): StoredMessage[] => {
-            return getPrivateMessages(peerNickname, settings.displayName || nickname);
+        (peerId: string): StoredMessage[] => {
+            return getPrivateMessagesForPeer(peerId);
         },
-        [nickname, settings.displayName]
+        []
     );
 
     const markRead = useCallback((peerId: string) => {
@@ -371,7 +389,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 await BitchatAPI.sendMessage(text, mentions, channelName);
 
                 const stored: StoredMessage = {
-                    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+                    id: generateId(),
                     sender: settings.displayName || nickname,
                     content: text,
                     timestamp: Date.now(),
@@ -410,10 +428,19 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         []
     );
 
-    const joinChannel = useCallback((channelName: string, _password?: string) => {
+    const joinChannel = useCallback(async (channelName: string, password?: string) => {
+        let isProtected = false;
+        if (password) {
+            try {
+                await BitchatAPI.setChannelPassword(channelName, password);
+                isProtected = true;
+            } catch (e) {
+                log.error('Failed to set channel password:', e);
+            }
+        }
         upsertChannel({
             name: channelName,
-            isPasswordProtected: false,
+            isPasswordProtected: isProtected,
             createdAt: Date.now(),
             lastMessage: '',
             lastMessageSender: '',
@@ -452,17 +479,21 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         (messageId: string): boolean => {
             const deleted = dbDeleteMessage(messageId);
             if (deleted) {
+                refreshConversations();
                 setMessageVersion((v) => v + 1);
             }
             return deleted;
         },
-        []
+        [refreshConversations]
     );
 
     // ─── Settings ────────────────────────────────────────────
 
     const updateSettingsHandler = useCallback(
         (update: Partial<AppSettings>) => {
+            if (update.displayName !== undefined) {
+                update = { ...update, displayName: sanitizeDisplayName(update.displayName) };
+            }
             saveSettings(update);
             const newSettings = getSettings();
             setSettings(newSettings);
@@ -475,7 +506,6 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
     // ─── AppState Lifecycle ──────────────────────────────────
 
-    const appStateRef = useRef<AppStateStatus>(RNAppState.currentState);
 
     useEffect(() => {
         const subscription = RNAppState.addEventListener('change', (nextState) => {

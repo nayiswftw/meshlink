@@ -20,6 +20,7 @@ function makeMessage(overrides: Partial<StoredMessage> = {}): StoredMessage {
         content: 'hello',
         timestamp: 1000,
         isPrivate: true,
+        senderPeerID: 'peer-alice',
         isMine: false,
         status: 'delivered',
         ...overrides,
@@ -103,13 +104,12 @@ describe('Database', () => {
 
     // ── Messages ─────────────────────────────────────
 
-    describe('saveMessage & getPrivateMessages', () => {
-        it('saves and retrieves private messages', async () => {
+    describe('saveMessage & getPrivateMessagesForPeer', () => {
+        it('saves and retrieves private messages by peerId', async () => {
             const db = await loadDb();
-            const msg = makeMessage({ sender: 'Alice', isPrivate: true, isMine: false });
-            db.saveMessage(msg);
+            db.saveMessage(makeMessage({ isPrivate: true, isMine: false }));
 
-            const result = db.getPrivateMessages('Alice', 'Me');
+            const result = db.getPrivateMessagesForPeer('peer-alice');
             expect(result).toHaveLength(1);
             expect(result[0].content).toBe('hello');
         });
@@ -119,18 +119,18 @@ describe('Database', () => {
             db.saveMessage(makeMessage({ id: 'x', content: 'v1' }));
             db.saveMessage(makeMessage({ id: 'x', content: 'v2' }));
 
-            const msgs = db.getPrivateMessages('Alice', 'Me');
+            const msgs = db.getPrivateMessagesForPeer('peer-alice');
             expect(msgs).toHaveLength(1);
             expect(msgs[0].content).toBe('v2');
         });
 
         it('sorts messages by timestamp', async () => {
             const db = await loadDb();
-            db.saveMessage(makeMessage({ id: '2', timestamp: 2000, sender: 'Alice' }));
-            db.saveMessage(makeMessage({ id: '1', timestamp: 1000, sender: 'Alice' }));
-            db.saveMessage(makeMessage({ id: '3', timestamp: 3000, sender: 'Alice' }));
+            db.saveMessage(makeMessage({ id: '2', timestamp: 2000 }));
+            db.saveMessage(makeMessage({ id: '1', timestamp: 1000 }));
+            db.saveMessage(makeMessage({ id: '3', timestamp: 3000 }));
 
-            const msgs = db.getPrivateMessages('Alice', 'Me');
+            const msgs = db.getPrivateMessagesForPeer('peer-alice');
             expect(msgs.map((m) => m.id)).toEqual(['1', '2', '3']);
         });
     });
@@ -141,7 +141,7 @@ describe('Database', () => {
             db.saveMessage(makeMessage({ id: 'msg-1', status: 'sending' }));
             db.updateMessageStatus('msg-1', 'delivered');
 
-            const msgs = db.getPrivateMessages('Alice', 'Me');
+            const msgs = db.getPrivateMessagesForPeer('peer-alice');
             expect(msgs[0].status).toBe('delivered');
         });
 
@@ -339,17 +339,64 @@ describe('Database', () => {
     describe('deleteMessage', () => {
         it('removes a message by id', async () => {
             const db = await loadDb();
-            db.saveMessage(makeMessage({ id: 'x', sender: 'Alice', content: 'doomed' }));
-            expect(db.getPrivateMessages('Alice', 'Me')).toHaveLength(1);
+            db.saveMessage(makeMessage({ id: 'x', content: 'doomed' }));
+            expect(db.getPrivateMessagesForPeer('peer-alice')).toHaveLength(1);
 
             const deleted = db.deleteMessage('x');
             expect(deleted).toBe(true);
-            expect(db.getPrivateMessages('Alice', 'Me')).toHaveLength(0);
+            expect(db.getPrivateMessagesForPeer('peer-alice')).toHaveLength(0);
         });
 
         it('returns false for unknown id', async () => {
             const db = await loadDb();
             expect(db.deleteMessage('nonexistent')).toBe(false);
+        });
+
+        it('updates parent conversation lastMessage after deletion', async () => {
+            const db = await loadDb();
+            db.saveMessage(makeMessage({ id: '1', content: 'first', timestamp: 1000, senderPeerID: 'p1' }));
+            db.saveMessage(makeMessage({ id: '2', content: 'second', timestamp: 2000, senderPeerID: 'p1' }));
+            db.upsertConversation(makeConversation({ peerId: 'p1', lastMessage: 'second' }));
+
+            db.deleteMessage('2');
+            const conv = db.getConversations().find((c) => c.peerId === 'p1');
+            expect(conv?.lastMessage).toBe('first');
+        });
+
+        it('clears conversation lastMessage when all messages deleted', async () => {
+            const db = await loadDb();
+            db.saveMessage(makeMessage({ id: '1', content: 'only', senderPeerID: 'p1' }));
+            db.upsertConversation(makeConversation({ peerId: 'p1', lastMessage: 'only' }));
+
+            db.deleteMessage('1');
+            const conv = db.getConversations().find((c) => c.peerId === 'p1');
+            expect(conv?.lastMessage).toBe('');
+        });
+
+        it('updates parent channel lastMessage after deletion', async () => {
+            const db = await loadDb();
+            db.saveMessage(makeMessage({ id: '1', content: 'first', timestamp: 1000, isPrivate: false, channel: '#test' }));
+            db.saveMessage(makeMessage({ id: '2', content: 'second', timestamp: 2000, isPrivate: false, channel: '#test' }));
+            db.upsertChannel(makeChannel({ name: '#test', lastMessage: 'second' }));
+
+            db.deleteMessage('2');
+            const ch = db.getChannel('#test');
+            expect(ch?.lastMessage).toBe('first');
+        });
+    });
+
+    // ── hasMessage ────────────────────────────────────
+
+    describe('hasMessage', () => {
+        it('returns true for existing message', async () => {
+            const db = await loadDb();
+            db.saveMessage(makeMessage({ id: 'exists' }));
+            expect(db.hasMessage('exists')).toBe(true);
+        });
+
+        it('returns false for non-existing message', async () => {
+            const db = await loadDb();
+            expect(db.hasMessage('nope')).toBe(false);
         });
     });
 });

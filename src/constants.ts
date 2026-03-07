@@ -19,6 +19,7 @@ export const PEER_CARD_COLORS = [
  * Derive a deterministic colour from a peer ID or name.
  */
 export function peerColor(identifier: string): string {
+    if (!identifier) return PEER_CARD_COLORS[0];
     let hash = 0;
     for (let i = 0; i < identifier.length; i++) {
         hash = (hash * 31 + identifier.charCodeAt(i)) | 0;

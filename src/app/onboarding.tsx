@@ -2,7 +2,7 @@
  * Onboarding — First launch setup: intro slides, BT permission, and name input.
  * expo-bitchat handles BLE mesh networking natively.
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     View,
     Text,
@@ -12,6 +12,7 @@ import {
     KeyboardAvoidingView,
     Platform,
     StatusBar,
+    BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -79,6 +80,17 @@ export default function OnboardingScreen() {
         });
     };
 
+    // Prevent Android back button from leaving onboarding
+    useEffect(() => {
+        const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+            if (step > 0) {
+                animateTransition(step - 1);
+            }
+            return true; // Always consume — don't exit during onboarding
+        });
+        return () => sub.remove();
+    });
+
     const handleNext = () => {
         if (step < STEPS.length - 1) {
             animateTransition(step + 1);
@@ -97,11 +109,9 @@ export default function OnboardingScreen() {
     };
 
     const handleFinish = () => {
-        if (name.trim()) {
-            updateSettings({ displayName: name.trim(), onboardingComplete: true });
-        } else {
-            updateSettings({ onboardingComplete: true });
-        }
+        const trimmed = name.trim();
+        if (!trimmed) return; // Name is required
+        updateSettings({ displayName: trimmed, onboardingComplete: true });
         setOnboardingComplete();
         router.replace('/(tabs)/peers');
     };

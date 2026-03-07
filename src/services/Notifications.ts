@@ -26,20 +26,20 @@ Notifications.setNotificationHandler({
  * Returns true if granted.
  */
 export async function requestNotificationPermissions(): Promise<boolean> {
-    const { status: existing } = await Notifications.getPermissionsAsync();
-    if (existing === 'granted') return true;
-
-    const { status } = await Notifications.requestPermissionsAsync();
-
+    // Always ensure Android notification channel exists (required for Android 8+)
     if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('messages', {
             name: 'Messages',
             importance: Notifications.AndroidImportance.HIGH,
             vibrationPattern: [0, 250, 250, 250],
             lightColor: '#C4903D',
-        });
+        }).catch(() => {});
     }
 
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    if (existing === 'granted') return true;
+
+    const { status } = await Notifications.requestPermissionsAsync();
     return status === 'granted';
 }
 
@@ -52,6 +52,9 @@ export async function notifyIncomingMessage(
     channelName?: string,
 ): Promise<void> {
     try {
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status !== 'granted') return;
+
         const title = channelName ? `${sender} in ${channelName}` : sender;
         const body = content.length > 100 ? content.slice(0, 100) + '…' : content;
 

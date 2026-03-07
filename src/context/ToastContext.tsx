@@ -104,6 +104,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         [opacity, translateY]
     );
 
+    // Clean up timer on unmount
+    React.useEffect(() => {
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    }, []);
+
     const config = toast ? TOAST_CONFIG[toast.type] : null;
 
     return (

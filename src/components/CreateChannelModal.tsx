@@ -91,7 +91,7 @@ export default function CreateChannelModal({
                             placeholder="general"
                             placeholderTextColor="#B8B0A0"
                             value={name.startsWith('#') ? name.slice(1) : name}
-                            onChangeText={(t) => setName(t.replace(/\s/g, '-').toLowerCase())}
+                            onChangeText={(t) => setName(t.replace(/[^a-z0-9\-_]/gi, '').toLowerCase())}
                             maxLength={24}
                             autoCapitalize="none"
                             autoCorrect={false}

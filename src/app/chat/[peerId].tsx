@@ -19,7 +19,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../../context/MeshContext';
 import { useToast } from '../../context/ToastContext';
 import ChatBubble from '../../components/ChatBubble';
+import VoiceRecordButton from '../../components/VoiceRecordButton';
+import { startRecording, stopRecording, cancelRecording, encodeAudioMessage } from '../../services/AudioService';
 import { peerColor } from '../../constants';
+import { formatName } from '../../utils';
 import type { StoredMessage } from '../../types';
 
 export default function ChatScreen() {
@@ -45,9 +48,10 @@ export default function ChatScreen() {
 
     // Get peer info — try active peers first, then fall back to stored conversation name
     const conv = peerId ? conversations.find((c) => c.peerId === peerId || c.peerName === peerId) : undefined;
-    const peerNickname = peerId ? (peers[peerId] ?? conv?.peerName ?? 'Unknown') : 'Unknown';
+    const rawNickname = peerId ? (peers[peerId] ?? conv?.peerName ?? 'Unknown') : 'Unknown';
+    const peerNickname = formatName(rawNickname);
     const color = peerColor(peerId || '');
-    const activePeerId = Object.keys(peers).find(id => peers[id] === peerNickname);
+    const activePeerId = Object.keys(peers).find(id => peers[id] === rawNickname);
     const isConnected = !!activePeerId;
 
     // Load messages
@@ -95,13 +99,39 @@ export default function ChatScreen() {
         setIsSending(true);
 
         try {
-            await sendPrivateMessage(activePeerId || peerId, peerNickname, text);
+            await sendPrivateMessage(activePeerId || peerId, rawNickname, text);
             loadMessages();
         } catch (error) {
             showToast('Failed to send message', 'error');
         } finally {
             setIsSending(false);
         }
+    };
+
+    const handleVoiceRecordStart = () => {
+        startRecording().catch(() => showToast('Could not start recording', 'error'));
+    };
+
+    const handleVoiceRecordEnd = async () => {
+        setIsSending(true);
+        const base64 = await stopRecording();
+        if (!base64 || !peerId) {
+            setIsSending(false);
+            return;
+        }
+        const audioContent = encodeAudioMessage(base64);
+        try {
+            await sendPrivateMessage(activePeerId || peerId, rawNickname, audioContent);
+            loadMessages();
+        } catch {
+            showToast('Failed to send voice message', 'error');
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    const handleVoiceRecordCancel = () => {
+        cancelRecording();
     };
 
     return (
@@ -172,10 +202,10 @@ export default function ChatScreen() {
             />
 
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 className="flex-1"
                 style={{ flex: 1 }}
-                keyboardVerticalOffset={90}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
                 {/* Messages */}
                 <FlatList
@@ -262,6 +292,16 @@ export default function ChatScreen() {
                             color={input.trim() ? '#FFFFFF' : '#4B5563'}
                         />
                     </TouchableOpacity>
+                    {!input.trim() && (
+                        <View className="ml-1.5">
+                            <VoiceRecordButton
+                                onRecordStart={handleVoiceRecordStart}
+                                onRecordEnd={handleVoiceRecordEnd}
+                                onRecordCancel={handleVoiceRecordCancel}
+                                disabled={isSending}
+                            />
+                        </View>
+                    )}
                 </View>
             </KeyboardAvoidingView>
         </SafeAreaView>

@@ -6,6 +6,7 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~54.0.22",
+    "expo-audio": "^55.0.8",
     "expo-bitchat": "^0.1.0",
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.20",
@@ -13,6 +14,7 @@
     "expo-haptics": "~15.0.8",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",
+    "expo-location": "^55.1.2",
     "expo-notifications": "~0.32.16",
     "expo-router": "~6.0.14",
     "expo-secure-store": "~15.0.8",
@@ -30,6 +32,7 @@
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/react": "~19.1.0",
+    "@types/uuid": "^10.0.0",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.6",
     "typescript": "~5.9.2"

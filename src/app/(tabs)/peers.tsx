@@ -2,7 +2,7 @@
  * Network tab — Real-time list of nearby BLE peers with mesh status.
  * expo-bitchat handles scanning/discovery automatically.
  */
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
     View,
     Text,
@@ -12,14 +12,19 @@ import {
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../../context/MeshContext';
+import { formatName } from '../../utils';
 import PeerCard from '../../components/PeerCard';
 import RadarAnimation from '../../components/RadarAnimation';
+import MeshMap from '../../components/MeshMap';
+
+type ViewMode = 'list' | 'map';
 
 export default function PeersScreen() {
-    const { peers, isRunning, startMesh, connectedPeerCount } = useMesh();
+    const { peers, isRunning, startMesh, connectedPeerCount, topologyNodes, topologyEdges } = useMesh();
+    const [viewMode, setViewMode] = useState<ViewMode>('list');
 
     const peerEntries = useMemo(
-        () => Object.entries(peers).map(([id, nick]) => ({ id, nickname: nick })),
+        () => Object.entries(peers).map(([id, nick]) => ({ id, nickname: formatName(nick) })),
         [peers]
     );
 
@@ -49,9 +54,27 @@ export default function PeersScreen() {
                     </View>
                 </View>
                 {peerEntries.length > 0 && (
-                    <Text className="text-[#6B7280] text-sm">
-                        {peerEntries.length} device{peerEntries.length !== 1 ? 's' : ''} nearby
-                    </Text>
+                    <View className="flex-row items-center justify-between">
+                        <Text className="text-[#6B7280] text-sm">
+                            {peerEntries.length} device{peerEntries.length !== 1 ? 's' : ''} nearby
+                        </Text>
+                        {isRunning && (
+                            <View className="flex-row rounded-lg overflow-hidden" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                <TouchableOpacity
+                                    onPress={() => setViewMode('list')}
+                                    style={{ paddingHorizontal: 10, paddingVertical: 5, backgroundColor: viewMode === 'list' ? '#059669' : '#FFFFFF' }}
+                                >
+                                    <Ionicons name="list" size={16} color={viewMode === 'list' ? '#FFFFFF' : '#6B7280'} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => setViewMode('map')}
+                                    style={{ paddingHorizontal: 10, paddingVertical: 5, backgroundColor: viewMode === 'map' ? '#059669' : '#FFFFFF' }}
+                                >
+                                    <Ionicons name="git-network-outline" size={16} color={viewMode === 'map' ? '#FFFFFF' : '#6B7280'} />
+                                </TouchableOpacity>
+                            </View>
+                        )}
+                    </View>
                 )}
             </View>
 
@@ -91,6 +114,14 @@ export default function PeersScreen() {
                             </TouchableOpacity>
                         </>
                     )}
+                </View>
+            ) : viewMode === 'map' ? (
+                <View style={{ flex: 1, paddingTop: 16 }}>
+                    <MeshMap
+                        nodes={topologyNodes}
+                        edges={topologyEdges}
+                        onPeerPress={handlePeerPress}
+                    />
                 </View>
             ) : (
                 <FlatList

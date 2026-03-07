@@ -27,6 +27,13 @@ export async function hydrateAppState(): Promise<void> {
         if (settingsRaw) {
             settingsCache = { ...DEFAULT_SETTINGS, ...JSON.parse(settingsRaw) };
         }
+        
+        // Ensure deviceId exists
+        if (!settingsCache.deviceId) {
+            settingsCache.deviceId = Math.random().toString(36).substring(2, 10);
+            await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsCache));
+        }
+
         onboardingComplete = onboardingRaw === 'true';
     } catch (e) {
         console.warn('[AppState] Hydration error:', e);

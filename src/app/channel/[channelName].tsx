@@ -19,6 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../../context/MeshContext';
 import { useToast } from '../../context/ToastContext';
 import ChatBubble from '../../components/ChatBubble';
+import VoiceRecordButton from '../../components/VoiceRecordButton';
+import { startRecording, stopRecording, cancelRecording, encodeAudioMessage } from '../../services/AudioService';
 import { peerColor } from '../../constants';
 import type { StoredMessage } from '../../types';
 
@@ -79,6 +81,32 @@ export default function ChannelChatScreen() {
         } finally {
             setIsSending(false);
         }
+    };
+
+    const handleVoiceRecordStart = () => {
+        startRecording().catch(() => showToast('Could not start recording', 'error'));
+    };
+
+    const handleVoiceRecordEnd = async () => {
+        setIsSending(true);
+        const base64 = await stopRecording();
+        if (!base64 || !decodedName) {
+            setIsSending(false);
+            return;
+        }
+        const audioContent = encodeAudioMessage(base64);
+        try {
+            await sendChannelMessage(decodedName, audioContent);
+            loadMessages();
+        } catch {
+            showToast('Failed to send voice message', 'error');
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    const handleVoiceRecordCancel = () => {
+        cancelRecording();
     };
 
     const channelColor = peerColor(decodedName);
@@ -147,10 +175,10 @@ export default function ChannelChatScreen() {
             />
 
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 className="flex-1"
                 style={{ flex: 1 }}
-                keyboardVerticalOffset={90}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
                 {/* Messages */}
                 <FlatList
@@ -233,6 +261,16 @@ export default function ChannelChatScreen() {
                             color={input.trim() ? '#FFFFFF' : '#4B5563'}
                         />
                     </TouchableOpacity>
+                    {!input.trim() && (
+                        <View className="ml-1.5">
+                            <VoiceRecordButton
+                                onRecordStart={handleVoiceRecordStart}
+                                onRecordEnd={handleVoiceRecordEnd}
+                                onRecordCancel={handleVoiceRecordCancel}
+                                disabled={isSending}
+                            />
+                        </View>
+                    )}
                 </View>
             </KeyboardAvoidingView>
         </SafeAreaView>

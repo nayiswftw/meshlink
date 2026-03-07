@@ -15,6 +15,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../../context/MeshContext';
 import { peerColor } from '../../constants';
+import { formatName } from '../../utils';
 import CreateChannelModal from '../../components/CreateChannelModal';
 import type { Conversation, Channel } from '../../types';
 
@@ -88,14 +89,14 @@ function OnlinePeerAvatar({ name, peerId, unread }: { name: string; peerId: stri
 /* ─── Conversation Row ────────────────────────────────────── */
 function ConversationItem({ conv }: { conv: Conversation }) {
     const color = peerColor(conv.peerId);
-    const initials = conv.peerName.slice(0, 2).toUpperCase() || '??';
+    const initials = formatName(conv.peerName).slice(0, 2).toUpperCase() || '??';
 
     return (
         <TouchableOpacity
             onPress={() => router.push(`/chat/${conv.peerId}`)}
             activeOpacity={0.6}
             accessibilityRole="button"
-            accessibilityLabel={`Chat with ${conv.peerName}${conv.unreadCount > 0 ? `, ${conv.unreadCount} unread` : ''}`}
+            accessibilityLabel={`Chat with ${formatName(conv.peerName)}${conv.unreadCount > 0 ? `, ${conv.unreadCount} unread` : ''}`}
             className="flex-row items-center py-3 px-4"
         >
             <View
@@ -110,7 +111,7 @@ function ConversationItem({ conv }: { conv: Conversation }) {
             <View className="flex-1 mr-3">
                 <View className="flex-row items-center justify-between mb-0.5">
                     <Text className="text-[#111827] font-semibold text-[15px] flex-1 mr-2" numberOfLines={1}>
-                        {conv.peerName}
+                        {formatName(conv.peerName)}
                     </Text>
                     <Text className="text-[#9CA3AF] text-xs">
                         {formatTimestamp(conv.lastMessageTimestamp)}
@@ -171,7 +172,7 @@ function ChannelItem({ channel }: { channel: Channel }) {
                 <View className="flex-row items-center justify-between">
                     {channel.lastMessage ? (
                         <Text className="text-[#6B7280] text-[13px] flex-1 mr-2" numberOfLines={1}>
-                            {channel.lastMessageSender ? `${channel.lastMessageSender}: ` : ''}
+                            {channel.lastMessageSender ? `${formatName(channel.lastMessageSender)}: ` : ''}
                             {channel.lastMessage}
                         </Text>
                     ) : (
@@ -209,7 +210,7 @@ export default function ChatsScreen() {
     const onlinePeers = useMemo(() => {
         return Object.entries(peers).map(([id, nick]) => {
             const conv = conversations.find((c) => c.peerId === id || c.peerName === nick);
-            return { id, name: nick, unread: conv?.unreadCount ?? 0 };
+            return { id, name: formatName(nick), unread: conv?.unreadCount ?? 0 };
         });
     }, [peers, conversations]);
 

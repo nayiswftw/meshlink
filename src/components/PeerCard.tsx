@@ -6,6 +6,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { peerColor } from '../constants';
+import { formatName } from '../utils';
 
 interface PeerCardProps {
     peerID: string;
@@ -15,14 +16,14 @@ interface PeerCardProps {
 
 function PeerCardInner({ peerID, nickname, onPress }: PeerCardProps) {
     const color = peerColor(peerID);
-    const initials = nickname.slice(0, 2).toUpperCase() || '??';
+    const initials = formatName(nickname).slice(0, 2).toUpperCase() || '??';
 
     return (
         <TouchableOpacity
             onPress={() => onPress(peerID, nickname)}
             activeOpacity={0.6}
             accessibilityRole="button"
-            accessibilityLabel={`Chat with ${nickname}, connected`}
+            accessibilityLabel={`Chat with ${formatName(nickname)}, connected`}
             accessibilityHint="Opens a conversation with this peer"
             className="flex-row items-center py-3.5"
         >
@@ -42,7 +43,7 @@ function PeerCardInner({ peerID, nickname, onPress }: PeerCardProps) {
             {/* Info */}
             <View className="flex-1">
                 <Text className="text-[#111827] font-semibold text-[15px]" numberOfLines={1}>
-                    {nickname}
+                    {formatName(nickname)}
                 </Text>
                 <Text className="text-[#6B7280] text-xs mt-0.5">Connected via BLE</Text>
             </View>
@@ -50,7 +51,7 @@ function PeerCardInner({ peerID, nickname, onPress }: PeerCardProps) {
             <TouchableOpacity
                 onPress={() => onPress(peerID, nickname)}
                 className="w-9 h-9 rounded-full bg-[#ECFDF5] items-center justify-center"
-                accessibilityLabel={`Message ${nickname}`}
+                accessibilityLabel={`Message ${formatName(nickname)}`}
             >
                 <Ionicons name="chatbubble" size={14} color="#059669" />
             </TouchableOpacity>

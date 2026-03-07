@@ -5,6 +5,9 @@
 import React from 'react';
 import { View, Text, Alert, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { isAudioMessage, decodeAudioMessage } from '../services/AudioService';
+import AudioBubble from './AudioBubble';
+import { formatName } from '../utils';
 
 interface ChatBubbleProps {
     content: string;
@@ -54,6 +57,8 @@ function ChatBubbleInner({
     senderColor,
 }: ChatBubbleProps) {
     const statusIcon = isMine ? getStatusIcon(status) : null;
+    const isAudio = isAudioMessage(content);
+    const audioData = isAudio ? decodeAudioMessage(content) : '';
 
     const handleLongPress = () => {
         if (!messageId || !onDelete) return;
@@ -79,7 +84,7 @@ function ChatBubbleInner({
     // Show inline avatar for received messages
     if (!isMine && senderName) {
         const avatarColor = senderColor || '#6366F1';
-        const initials = senderName.slice(0, 1).toUpperCase();
+        const formattedSender = formatName(senderName); const initials = formattedSender.slice(0, 1).toUpperCase();
         return (
             <View className="flex-row items-end mb-2.5 self-start max-w-[85%]">
                 {/* Sender avatar */}
@@ -95,16 +100,18 @@ function ChatBubbleInner({
                     {...(wrapperProps as any)}
                     className="flex-shrink"
                     accessibilityRole="text"
-                    accessibilityLabel={`${senderName}: ${content}. ${formatTime(timestamp)}`}
+                    accessibilityLabel={`${formattedSender}: ${content}. ${formatTime(timestamp)}`}
                 >
                     {/* Sender name */}
-                    <Text className="text-xs font-medium mb-1 ml-1" style={{ color: avatarColor }}>
-                        {senderName}
-                    </Text>
+                    <Text className="text-xs font-medium mb-1 ml-1" style={{ color: avatarColor }}>{formattedSender}</Text>
                     <View className="rounded-2xl rounded-bl-sm px-4 py-2.5 bg-[#FFFFFF]" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
-                        <Text className="text-[15px] leading-5 text-[#1F2937]">
-                            {content}
-                        </Text>
+                        {isAudio ? (
+                            <AudioBubble audioData={audioData} messageId={messageId || ''} isMine={false} />
+                        ) : (
+                            <Text className="text-[15px] leading-5 text-[#1F2937]">
+                                {content}
+                            </Text>
+                        )}
                     </View>
                     <View className="flex-row items-center mt-1 gap-1 justify-start">
                         <Text className="text-[11px] text-[#9CA3AF]">
@@ -131,12 +138,16 @@ function ChatBubbleInner({
                     }`}
                 style={!isMine ? { borderWidth: 1, borderColor: '#E5E7EB' } : undefined}
             >
-                <Text
-                    className={`text-[15px] leading-5 ${isMine ? 'text-white' : 'text-[#1F2937]'
-                        }`}
-                >
-                    {content}
-                </Text>
+                {isAudio ? (
+                    <AudioBubble audioData={audioData} messageId={messageId || ''} isMine={isMine} />
+                ) : (
+                    <Text
+                        className={`text-[15px] leading-5 ${isMine ? 'text-white' : 'text-[#1F2937]'
+                            }`}
+                    >
+                        {content}
+                    </Text>
+                )}
             </View>
 
             {/* Timestamp & Status */}

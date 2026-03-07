@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../context/MeshContext';
 import { setOnboardingComplete } from '../services/storage/AppState';
 import { requestBluetoothPermissions, type PermissionStatus } from '../services/Permissions';
+import { requestAudioPermissions } from '../services/AudioService';
 import RadarAnimation from '../components/RadarAnimation';
 
 const STEPS = [
@@ -100,10 +101,15 @@ export default function OnboardingScreen() {
     };
 
     const handlePermission = async () => {
+        const audioStatus = await requestAudioPermissions();
         const status = await requestBluetoothPermissions();
+        // Fallback or consider full if both granted. Here we prioritize BT status.
         setPermStatus(status);
-        if (status === 'granted') {
+        if (status === 'granted' && audioStatus) {
             // Auto-advance after a short delay so user sees the success state
+            setTimeout(() => animateTransition(STEPS.length + 1), 600);
+        } else if (status === 'granted') {
+            // If BT granted but audio failed, just proceed anyway
             setTimeout(() => animateTransition(STEPS.length + 1), 600);
         }
     };
@@ -124,7 +130,7 @@ export default function OnboardingScreen() {
         <SafeAreaView className="flex-1 bg-[#F9FAFB]" style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
             <StatusBar barStyle="dark-content" />
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 className="flex-1"
                 style={{ flex: 1 }}
             >
@@ -170,26 +176,26 @@ export default function OnboardingScreen() {
                         {isPermissionStep && (
                             <>
                                 <View className="w-16 h-16 rounded-2xl bg-[#ECFDF5] items-center justify-center mb-8">
-                                    <Ionicons name="bluetooth-outline" size={32} color="#059669" />
+                                    <Ionicons name="hardware-chip-outline" size={32} color="#059669" />
                                 </View>
                                 <Text
                                     className="text-[#111827] text-2xl font-bold text-center mb-3"
                                     style={{ color: '#111827' }}
                                     accessibilityRole="header"
                                 >
-                                    Enable Bluetooth
+                                    Enable Permissions
                                 </Text>
                                 <Text
                                     className="text-[#6B7280] text-sm text-center mb-8 max-w-xs"
                                     style={{ color: '#6B7280' }}
                                 >
-                                    Meshlink needs Bluetooth to discover nearby devices and relay messages securely.
+                                    Meshlink needs Bluetooth to discover nearby devices and Microphone to send voice messages.
                                 </Text>
                                 {permStatus === 'granted' && (
                                     <View className="flex-row items-center bg-[#ECFDF5] rounded-xl px-4 py-3 mb-4">
                                         <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
                                         <Text className="text-[#059669] text-sm font-medium ml-2">
-                                            Bluetooth permission granted
+                                            Permissions granted
                                         </Text>
                                     </View>
                                 )}

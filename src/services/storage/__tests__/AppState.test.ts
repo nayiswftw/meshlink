@@ -29,7 +29,14 @@ describe('AppState', () => {
     describe('hydrateAppState', () => {
         it('loads default settings when storage is empty', async () => {
             const state = await loadAppState();
-            expect(state.getSettings()).toEqual(DEFAULT_SETTINGS);
+            const settings = state.getSettings();
+            // deviceId is auto-generated on first hydration, so check all other fields match defaults
+            const { deviceId, ...rest } = settings;
+            const { deviceId: _defaultId, ...defaultRest } = DEFAULT_SETTINGS;
+            expect(rest).toEqual(defaultRest);
+            expect(deviceId).toBeTruthy();
+            expect(typeof deviceId).toBe('string');
+            expect(deviceId.length).toBeGreaterThan(0);
         });
 
         it('loads saved settings from storage', async () => {

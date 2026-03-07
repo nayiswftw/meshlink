@@ -7,6 +7,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { createLogger } from './Logger';
+import { formatName } from '../utils';
 
 const log = createLogger('Notifications');
 
@@ -55,7 +56,7 @@ export async function notifyIncomingMessage(
         const { status } = await Notifications.getPermissionsAsync();
         if (status !== 'granted') return;
 
-        const title = channelName ? `${sender} in ${channelName}` : sender;
+        const title = channelName ? `${formatName(sender)} in ${channelName}` : formatName(sender);
         const body = content.length > 100 ? content.slice(0, 100) + '…' : content;
 
         await Notifications.scheduleNotificationAsync({

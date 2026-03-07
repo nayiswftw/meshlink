@@ -1,15 +1,17 @@
 /**
  * RadarAnimation — Pulsing radar effect for the peer discovery screen.
  */
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Animated, Easing, TouchableOpacity, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { formatName } from '../utils';
 
 interface RadarAnimationProps {
     isActive: boolean;
     size?: number;
     peers?: { id: string; nickname: string }[];
     onPeerPress?: (id: string, nickname: string) => void;
+    onTripleTap?: () => void;
 }
 
 export default function RadarAnimation({
@@ -17,6 +19,7 @@ export default function RadarAnimation({
     size = 200,
     peers = [],
     onPeerPress,
+    onTripleTap,
 }: RadarAnimationProps) {
     const pulse1 = useRef(new Animated.Value(0)).current;
     const pulse2 = useRef(new Animated.Value(0)).current;
@@ -137,6 +140,23 @@ export default function RadarAnimation({
         });
     }, [peers, size]);
 
+    // Triple-tap detection on center dot
+    const tapCountRef = useRef(0);
+    const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const handleCenterTap = useCallback(() => {
+        if (!onTripleTap) return;
+        tapCountRef.current += 1;
+        if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+        if (tapCountRef.current >= 3) {
+            tapCountRef.current = 0;
+            onTripleTap();
+        } else {
+            tapTimerRef.current = setTimeout(() => {
+                tapCountRef.current = 0;
+            }, 500);
+        }
+    }, [onTripleTap]);
+
     return (
         <View
             style={{
@@ -187,23 +207,29 @@ export default function RadarAnimation({
                         }}
                         numberOfLines={1}
                     >
-                        {peer.nickname || 'Unknown'}
+                        {formatName(peer.nickname) || 'Unknown'}
                     </Text>
                 </TouchableOpacity>
             ))}
 
-            {/* Center dot */}
-            <View
-                className="w-4 h-4 rounded-full bg-[#059669]"
-                pointerEvents="none"
-                style={{
-                    shadowColor: '#059669',
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.6,
-                    shadowRadius: 10,
-                    elevation: 8,
-                }}
-            />
+            {/* Center dot — triple-tap triggers onTripleTap */}
+            <TouchableOpacity
+                onPress={handleCenterTap}
+                activeOpacity={1}
+                hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+            >
+                <View
+                    className="w-4 h-4 rounded-full bg-[#059669]"
+                    pointerEvents="none"
+                    style={{
+                        shadowColor: '#059669',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: 0.6,
+                        shadowRadius: 10,
+                        elevation: 8,
+                    }}
+                />
+            </TouchableOpacity>
         </View>
     );
 }

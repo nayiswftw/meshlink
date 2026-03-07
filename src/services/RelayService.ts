@@ -8,14 +8,26 @@
 import BitchatAPI from 'expo-bitchat';
 import type { BitchatMessage, PeerInfo } from 'expo-bitchat';
 import { createLogger } from './Logger';
+import {
+    storeForwardMessage,
+    getStoreForwardForPeer,
+    removeStoreForwardMessages,
+    getStoreForwardCount,
+} from './storage/Database';
+import type { StoreForwardMessage } from '../types';
 
 const log = createLogger('RelayService');
 
 // ─── Configuration ───────────────────────────────────────────
 
 const MAX_HOPS = 5; // Maximum number of times a message can be relayed
+const MAX_SOS_HOPS = 10; // SOS messages get extended relay range
 const SEEN_MESSAGE_CACHE_SIZE = 1000; // Number of message IDs to track
 const SEEN_MESSAGE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const STORE_FORWARD_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+const SOS_PREFIX = '__SOS__';
+const SOS_DELIMITER = '__SOSDATA__';
 
 // ─── Relay Message Metadata ──────────────────────────────────
 
@@ -26,6 +38,18 @@ export interface RelayMetadata {
     destinationPeerID?: string; // Optional: specific destination for private messages
     destinationNickname?: string; // Preferred destination key for app-level matching
     relayPath?: string[]; // Track the path the message took
+}
+
+// ─── SOS Metadata ───────────────────────────────────────────
+
+export interface SOSPayload {
+    senderNickname: string;
+    senderPeerID: string;
+    message: string;
+    timestamp: number;
+    coordinates?: { lat: number; lon: number } | null;
+    hopCount: number;
+    relayPath: string[];
 }
 
 // ─── Seen Message Tracking ───────────────────────────────────
@@ -108,6 +132,7 @@ export class RelayService {
     private static instance: RelayService | null = null;
     private seenTracker: SeenMessageTracker;
     private isEnabled: boolean = true;
+    private storeForwardEnabled: boolean = true;
     private myPeerID: string = '';
     private myNickname: string = '';
 
@@ -137,6 +162,21 @@ export class RelayService {
     setEnabled(enabled: boolean): void {
         this.isEnabled = enabled;
         log.info(`Relay ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    /**
+     * Enable or disable store-and-forward
+     */
+    setStoreForwardEnabled(enabled: boolean): void {
+        this.storeForwardEnabled = enabled;
+        log.info(`Store-and-forward ${enabled ? 'enabled' : 'disabled'}`);
+    }
+
+    /**
+     * Check if store-and-forward is enabled
+     */
+    isStoreForwardEnabled(): boolean {
+        return this.storeForwardEnabled;
     }
 
     /**
@@ -249,6 +289,35 @@ export class RelayService {
 
         // Relay the message
         await this.relayMessage(message, metadata, actualContent, connectedPeers);
+
+        // Store-and-forward: if this is a private message for someone not currently
+        // connected, store it locally so we can forward when they connect later.
+        if (this.storeForwardEnabled && metadata.destinationNickname) {
+            const destinationConnected = Object.values(connectedPeers).includes(
+                metadata.destinationNickname
+            );
+            if (!destinationConnected) {
+                const sfMsg: StoreForwardMessage = {
+                    id: message.id,
+                    encodedContent: message.content, // Keep full relay-encoded content
+                    destinationNickname: metadata.destinationNickname,
+                    destinationPeerID: metadata.destinationPeerID,
+                    originNickname: metadata.originNickname,
+                    originPeerID: metadata.originPeerID,
+                    isPrivate: message.isPrivate,
+                    channel: message.channel,
+                    mentions: message.mentions,
+                    storedAt: Date.now(),
+                    expiresAt: Date.now() + STORE_FORWARD_TTL_MS,
+                    hopCount: metadata.hopCount,
+                };
+                storeForwardMessage(sfMsg);
+                log.info(
+                    `Stored message ${message.id} for offline peer ${metadata.destinationNickname}`
+                );
+            }
+        }
+
         return true;
     }
 
@@ -335,7 +404,18 @@ export class RelayService {
 
         // Send the message with relay metadata
         if (isPrivate && recipientPeerID && recipientNickname) {
-            await BitchatAPI.sendPrivateMessage(relayContent, recipientPeerID, recipientNickname);
+            const connected = await BitchatAPI.getConnectedPeers();
+            if (connected[recipientPeerID]) {
+                await BitchatAPI.sendPrivateMessage(relayContent, recipientPeerID, recipientNickname);
+            } else {
+                // DTN/Store & Forward: The destination is offline, inject into the mesh
+                // so connected nodes act as data mules.
+                const peerPromises = Object.keys(connected).map(pid =>
+                    BitchatAPI.sendPrivateMessage(relayContent, pid, connected[pid])
+                        .catch(e => log.error('Failed to inject S&F message to ' + connected[pid], e))
+                );
+                await Promise.allSettled(peerPromises);
+            }
         } else if (channel) {
             await BitchatAPI.sendMessage(relayContent, mentions || [], channel);
         }
@@ -343,14 +423,136 @@ export class RelayService {
         log.info(`Sent message with relay support (destination: ${recipientNickname || channel || 'broadcast'})`);
     }
 
+    // ─── SOS Broadcasting ────────────────────────────────────────
+
+    /**
+     * Encode an SOS message payload
+     */
+    encodeSOSMessage(payload: SOSPayload): string {
+        return `${SOS_PREFIX}${JSON.stringify(payload)}${SOS_DELIMITER}`;
+    }
+
+    /**
+     * Check if a message content is an SOS broadcast
+     */
+    isSOSMessage(content: string): boolean {
+        return content.startsWith(SOS_PREFIX);
+    }
+
+    /**
+     * Parse SOS payload from message content
+     */
+    parseSOSMessage(content: string): SOSPayload | null {
+        if (!content.startsWith(SOS_PREFIX)) return null;
+        try {
+            const delimIdx = content.indexOf(SOS_DELIMITER);
+            const json = delimIdx >= 0
+                ? content.substring(SOS_PREFIX.length, delimIdx)
+                : content.substring(SOS_PREFIX.length);
+            return JSON.parse(json) as SOSPayload;
+        } catch {
+            log.warn('Failed to parse SOS payload');
+            return null;
+        }
+    }
+
+    /**
+     * Broadcast an SOS alert to all connected peers.
+     * SOS messages get extended hop limit and bypass relay-enabled check.
+     */
+    async sendSOS(
+        message: string,
+        connectedPeers: PeerInfo,
+        coordinates?: { lat: number; lon: number } | null,
+    ): Promise<void> {
+        const payload: SOSPayload = {
+            senderNickname: this.myNickname,
+            senderPeerID: this.myPeerID,
+            message,
+            timestamp: Date.now(),
+            coordinates: coordinates ?? null,
+            hopCount: 0,
+            relayPath: [this.myPeerID],
+        };
+
+        const encoded = this.encodeSOSMessage(payload);
+
+        const peerIDs = Object.keys(connectedPeers);
+        log.info(`Broadcasting SOS to ${peerIDs.length} peers`);
+
+        const promises = peerIDs.map(async (peerID) => {
+            try {
+                await BitchatAPI.sendPrivateMessage(encoded, peerID, connectedPeers[peerID]);
+            } catch (error) {
+                log.error(`Failed to send SOS to ${connectedPeers[peerID]}:`, error);
+            }
+        });
+
+        await Promise.allSettled(promises);
+        log.info('SOS broadcast complete');
+    }
+
+    /**
+     * Relay a received SOS message if under hop limit.
+     * Returns true if relayed.
+     */
+    async relaySOSMessage(
+        messageId: string,
+        sosPayload: SOSPayload,
+        connectedPeers: PeerInfo,
+        senderPeerID?: string,
+    ): Promise<boolean> {
+        if (this.seenTracker.hasSeen(messageId)) return false;
+        this.seenTracker.markSeen(messageId);
+
+        if (sosPayload.hopCount >= MAX_SOS_HOPS) {
+            log.debug(`SOS ${messageId} exceeded max SOS hops (${MAX_SOS_HOPS})`);
+            return false;
+        }
+
+        if (sosPayload.relayPath.includes(this.myPeerID)) {
+            log.debug(`SOS ${messageId} already passed through this node`);
+            return false;
+        }
+
+        const relayed: SOSPayload = {
+            ...sosPayload,
+            hopCount: sosPayload.hopCount + 1,
+            relayPath: [...sosPayload.relayPath, this.myPeerID],
+        };
+
+        const encoded = this.encodeSOSMessage(relayed);
+
+        const peersToRelay = Object.keys(connectedPeers).filter(
+            (id) => id !== senderPeerID && !sosPayload.relayPath.includes(id)
+        );
+
+        if (peersToRelay.length === 0) return false;
+
+        log.info(`Relaying SOS from ${sosPayload.senderNickname} (hop ${relayed.hopCount}/${MAX_SOS_HOPS}) to ${peersToRelay.length} peers`);
+
+        const promises = peersToRelay.map(async (peerID) => {
+            try {
+                await BitchatAPI.sendPrivateMessage(encoded, peerID, connectedPeers[peerID]);
+            } catch (error) {
+                log.error(`Failed to relay SOS to ${connectedPeers[peerID]}:`, error);
+            }
+        });
+
+        await Promise.allSettled(promises);
+        return true;
+    }
+
     /**
      * Get relay statistics
      */
-    getStats(): { seenMessages: number; enabled: boolean; maxHops: number } {
+    getStats(): { seenMessages: number; enabled: boolean; maxHops: number; storeForwardCount: number; storeForwardEnabled: boolean } {
         return {
             seenMessages: this.seenTracker['seenMessages'].size,
             enabled: this.isEnabled,
             maxHops: MAX_HOPS,
+            storeForwardCount: getStoreForwardCount(),
+            storeForwardEnabled: this.storeForwardEnabled,
         };
     }
 
@@ -368,6 +570,48 @@ export class RelayService {
     destroy(): void {
         this.seenTracker.destroy();
         RelayService.instance = null;
+    }
+
+    // ─── Store-and-Forward (DTN) ───────────────────────────────
+
+    /**
+     * Flush stored messages for a newly-connected peer.
+     * Called when a peer connects — sends any held messages and removes them.
+     */
+    async flushStoreForward(peerNickname: string, peerID: string): Promise<number> {
+        if (!this.storeForwardEnabled) return 0;
+
+        const held = getStoreForwardForPeer(peerNickname);
+        if (held.length === 0) return 0;
+
+        log.info(`Flushing ${held.length} stored messages for ${peerNickname}`);
+
+        const delivered: string[] = [];
+
+        for (const msg of held) {
+            try {
+                if (msg.isPrivate) {
+                    await BitchatAPI.sendPrivateMessage(msg.encodedContent, peerID, peerNickname);
+                } else if (msg.channel) {
+                    await BitchatAPI.sendMessage(
+                        msg.encodedContent,
+                        msg.mentions || [],
+                        msg.channel
+                    );
+                }
+                delivered.push(msg.id);
+                log.debug(`Forwarded stored message ${msg.id} to ${peerNickname}`);
+            } catch (error) {
+                log.error(`Failed to forward stored message ${msg.id}:`, error);
+            }
+        }
+
+        if (delivered.length > 0) {
+            removeStoreForwardMessages(delivered);
+            log.info(`Delivered ${delivered.length}/${held.length} stored messages to ${peerNickname}`);
+        }
+
+        return delivered.length;
     }
 }
 

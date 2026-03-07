@@ -6,7 +6,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createLogger } from '../Logger';
-import type { StoredMessage, Conversation, Channel } from '../../types';
+import type { StoredMessage, Conversation, Channel, StoreForwardMessage } from '../../types';
 
 const log = createLogger('DB');
 
@@ -14,27 +14,40 @@ const log = createLogger('DB');
 const MESSAGES_KEY = '@meshlink/messages';
 const CONVERSATIONS_KEY = '@meshlink/conversations';
 const CHANNELS_KEY = '@meshlink/channels';
+const STORE_FORWARD_KEY = '@meshlink/store_forward';
 
 // ─── In-memory cache ─────────────────────────────────────────────
 let messagesCache: StoredMessage[] = [];
 let conversationsCache: Conversation[] = [];
 let channelsCache: Channel[] = [];
+let storeForwardCache: StoreForwardMessage[] = [];
 let isHydrated = false;
 const MAX_MESSAGES = 5000;
+const MAX_STORE_FORWARD = 500;
+const STORE_FORWARD_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ─── Hydration ───────────────────────────────────────────────────
 
 export async function hydrateDatabase(): Promise<void> {
     if (isHydrated) return;
     try {
-        const [msgs, convs, chans] = await Promise.all([
+        const [msgs, convs, chans, sf] = await Promise.all([
             AsyncStorage.getItem(MESSAGES_KEY),
             AsyncStorage.getItem(CONVERSATIONS_KEY),
             AsyncStorage.getItem(CHANNELS_KEY),
+            AsyncStorage.getItem(STORE_FORWARD_KEY),
         ]);
         messagesCache = msgs ? JSON.parse(msgs) : [];
         conversationsCache = convs ? JSON.parse(convs) : [];
         channelsCache = chans ? JSON.parse(chans) : [];
+        storeForwardCache = sf ? JSON.parse(sf) : [];
+        // Prune expired store-and-forward messages on hydration
+        const now = Date.now();
+        const before = storeForwardCache.length;
+        storeForwardCache = storeForwardCache.filter((m) => m.expiresAt > now);
+        if (storeForwardCache.length < before) {
+            persistStoreForward();
+        }
     } catch (e) {
         log.warn('Hydration error:', e);
     }
@@ -46,6 +59,7 @@ export async function hydrateDatabase(): Promise<void> {
 let msgPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let convPersistTimer: ReturnType<typeof setTimeout> | null = null;
 let chanPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let sfPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 function persistMessages() {
     if (msgPersistTimer) clearTimeout(msgPersistTimer);
@@ -70,6 +84,15 @@ function persistChannels() {
     chanPersistTimer = setTimeout(() => {
         AsyncStorage.setItem(CHANNELS_KEY, JSON.stringify(channelsCache)).catch((e) => {
             log.error('Failed to persist channels:', e);
+        });
+    }, 300);
+}
+
+function persistStoreForward() {
+    if (sfPersistTimer) clearTimeout(sfPersistTimer);
+    sfPersistTimer = setTimeout(() => {
+        AsyncStorage.setItem(STORE_FORWARD_KEY, JSON.stringify(storeForwardCache)).catch((e) => {
+            log.error('Failed to persist store-forward:', e);
         });
     }, 300);
 }
@@ -282,4 +305,52 @@ export function clearChatHistory(id: string, isChannel: boolean): boolean {
         return true;
     }
     return false;
+}
+
+// ─── Store-and-Forward (DTN) ────────────────────────────────────
+
+/** Store a message for later forwarding to an offline peer. */
+export function storeForwardMessage(msg: StoreForwardMessage): void {
+    // Dedup by message ID
+    if (storeForwardCache.some((m) => m.id === msg.id)) return;
+
+    storeForwardCache.push(msg);
+
+    // Prune expired
+    const now = Date.now();
+    storeForwardCache = storeForwardCache.filter((m) => m.expiresAt > now);
+
+    // Cap at MAX_STORE_FORWARD, drop oldest
+    if (storeForwardCache.length > MAX_STORE_FORWARD) {
+        storeForwardCache.sort((a, b) => a.storedAt - b.storedAt);
+        storeForwardCache = storeForwardCache.slice(-MAX_STORE_FORWARD);
+    }
+
+    persistStoreForward();
+    log.info(`Stored message ${msg.id} for ${msg.destinationNickname} (${storeForwardCache.length} held)`);
+}
+
+/** Get all stored messages destined for a specific peer nickname. */
+export function getStoreForwardForPeer(peerNickname: string): StoreForwardMessage[] {
+    const now = Date.now();
+    return storeForwardCache.filter(
+        (m) => m.destinationNickname === peerNickname && m.expiresAt > now
+    );
+}
+
+/** Remove delivered store-and-forward messages by IDs. */
+export function removeStoreForwardMessages(ids: string[]): void {
+    const idSet = new Set(ids);
+    storeForwardCache = storeForwardCache.filter((m) => !idSet.has(m.id));
+    persistStoreForward();
+}
+
+/** Get count of currently held store-and-forward messages. */
+export function getStoreForwardCount(): number {
+    // Prune expired on read
+    const now = Date.now();
+    const before = storeForwardCache.length;
+    storeForwardCache = storeForwardCache.filter((m) => m.expiresAt > now);
+    if (storeForwardCache.length < before) persistStoreForward();
+    return storeForwardCache.length;
 }

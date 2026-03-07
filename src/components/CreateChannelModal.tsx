@@ -57,7 +57,7 @@ export default function CreateChannelModal({
                 onPress={onClose}
             />
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}
             >
                 <View

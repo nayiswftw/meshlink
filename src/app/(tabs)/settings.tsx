@@ -64,6 +64,7 @@ export default function SettingsScreen() {
     const [editingName, setEditingName] = useState(false);
     const [nameInput, setNameInput] = useState(settings.displayName);
 
+
     const handleSaveName = () => {
         if (nameInput.trim()) {
             updateSettings({ displayName: nameInput.trim() });
@@ -154,8 +155,24 @@ export default function SettingsScreen() {
                     </SettingsRow>
                     <View className="px-4 py-2 bg-[#F9FAFB]">
                         <Text className="text-[#6B7280] text-xs leading-relaxed">
-                            When enabled, your device will forward messages through the mesh network,
-                            extending reach to peers beyond direct Bluetooth range.
+                            Forwards messages through your device to help them reach peers
+                            beyond direct Bluetooth range.
+                        </Text>
+                    </View>
+                    <SettingsRow icon="archive-outline" iconColor="#8B5CF6" label="Store & Forward" last>
+                        <Switch
+                            value={settings.storeForwardEnabled}
+                            onValueChange={(v) =>
+                                updateSettings({ storeForwardEnabled: v })
+                            }
+                            trackColor={{ false: '#E5E7EB', true: '#8B5CF6' }}
+                            thumbColor="#FFFFFF"
+                        />
+                    </SettingsRow>
+                    <View className="px-4 py-2 bg-[#F9FAFB]">
+                        <Text className="text-[#6B7280] text-xs leading-relaxed">
+                            Holds messages for offline peers and delivers them when they
+                            reconnect (up to 24 hours).
                         </Text>
                     </View>
                 </SettingsSection>

@@ -45,7 +45,10 @@ import {
 import { requestBluetoothPermissions } from '../services/Permissions';
 import { notifyIncomingMessage, requestNotificationPermissions } from '../services/Notifications';
 import RelayService from '../services/RelayService';
-import type { AppSettings, Conversation, StoredMessage, Channel } from '../types';
+import type { SOSPayload } from '../services/RelayService';
+import TopologyService from '../services/TopologyService';
+import { getAppDisplayName } from '../utils';
+import type { AppSettings, Conversation, StoredMessage, Channel, TopologyNode, TopologyEdge } from '../types';
 
 const log = createLogger('MeshContext');
 
@@ -103,6 +106,15 @@ interface MeshContextType {
     deleteMessage: (messageId: string) => boolean;
     clearHistory: (id: string, isChannel: boolean) => void;
 
+    // SOS
+    sendSOS: (message?: string, coordinates?: { lat: number; lon: number } | null) => Promise<void>;
+    activeSOSAlert: SOSPayload | null;
+    dismissSOS: () => void;
+
+    // Topology
+    topologyNodes: TopologyNode[];
+    topologyEdges: TopologyEdge[];
+
     // Settings
     settings: AppSettings;
     updateSettings: (update: Partial<AppSettings>) => void;
@@ -121,6 +133,28 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [settings, setSettings] = useState<AppSettings>(getSettings());
     const [messageVersion, setMessageVersion] = useState(0);
+
+    // Helpers to prevent ghost peer duplication
+    const deduplicatePeers = (inputPeers: PeerInfo): PeerInfo => {
+        const nicknameToId = new Map<string, string>();
+        for (const [id, nick] of Object.entries(inputPeers)) {
+            // Deduplicating by the raw nickname (which now includes deviceId string) naturally handles device deduplication!
+            nicknameToId.set(nick, id);
+        }
+        const finalPeers: PeerInfo = {};
+        for (const [nick, id] of nicknameToId.entries()) {
+            finalPeers[id] = nick;
+        }
+        return finalPeers;
+    };
+
+    const updatePeersFromMap = (peerMap: PeerInfo) => {
+        setPeers(deduplicatePeers(peerMap));
+    };
+
+    const [activeSOSAlert, setActiveSOSAlert] = useState<SOSPayload | null>(null);
+    const [topologyNodes, setTopologyNodes] = useState<TopologyNode[]>([]);
+    const [topologyEdges, setTopologyEdges] = useState<TopologyEdge[]>([]);
 
     const subscriptionsRef = useRef<Subscription[]>([]);
     const appStateRef = useRef<AppStateStatus>(RNAppState.currentState);
@@ -149,6 +183,12 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         })();
     }, []);
 
+    const refreshTopology = useCallback(() => {
+        const topo = TopologyService.getTopology();
+        setTopologyNodes(topo.nodes);
+        setTopologyEdges(topo.edges);
+    }, []);
+
     // ─── Mesh Service Lifecycle ──────────────────────────────
 
     const setupListeners = useCallback(() => {
@@ -157,7 +197,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         subscriptionsRef.current = [];
 
         // Get current display name for relay checks
-        const myDisplayName = settings.displayName || nickname;
+        const myDisplayName = getAppDisplayName(settings);
 
         // Incoming messages
         const msgSub = BitchatAPI.addMessageListener(async (message: BitchatMessage) => {
@@ -168,8 +208,36 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
             const isBackgrounded = appStateRef.current !== 'active';
 
+            // ── SOS Detection ─────────────────────────────
+            if (RelayService.isSOSMessage(message.content)) {
+                const sosPayload = RelayService.parseSOSMessage(message.content);
+                if (sosPayload && sosPayload.senderPeerID !== myDisplayName) {
+                    log.info(`SOS received from ${sosPayload.senderNickname}`);
+                    setActiveSOSAlert(sosPayload);
+                    // Force-notify regardless of notification settings
+                    notifyIncomingMessage(
+                        sosPayload.senderNickname,
+                        `🚨 SOS: ${sosPayload.message || 'Emergency alert!'}`
+                    );
+                    // Relay SOS to other peers (always, even if relay disabled)
+                    RelayService.relaySOSMessage(
+                        message.id,
+                        sosPayload,
+                        peers,
+                        message.senderPeerID
+                    ).catch((e) => log.error('SOS relay failed:', e));
+                }
+                return;
+            }
+
             // Parse relay metadata if present
             const { metadata: relayMetadata, actualContent } = RelayService.parseRelayMetadata(message.content);
+
+            // Feed relay path into topology graph
+            if (relayMetadata) {
+                TopologyService.ingestRelayPath(relayMetadata);
+                refreshTopology();
+            }
 
             // Determine if this message is for us
             // For private messages, check if we're the destination (if specified in metadata)
@@ -271,7 +339,8 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             setPeers((prev) => {
                 if (prev[peerID] === peerNick) return prev; // already tracked
                 log.info(`Peer connected: ${peerNick} (${peerID})`);
-                return { ...prev, [peerID]: peerNick };
+                const next = { ...prev, [peerID]: peerNick };
+                return deduplicatePeers(next);
             });
 
             // Flush offline queued messages
@@ -285,6 +354,15 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                     log.error(`Failed to flush message ${msg.id}:`, e);
                 }
             });
+
+            // Flush store-and-forward messages for this peer
+            RelayService.flushStoreForward(peerNick, peerID)
+                .then((count) => {
+                    if (count > 0) {
+                        log.info(`Forwarded ${count} stored messages to ${peerNick}`);
+                    }
+                })
+                .catch((e) => log.error('Store-forward flush failed:', e));
         });
 
         // Peer disconnected
@@ -300,7 +378,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         // Peer list updated (full sync)
         const peerListSub = BitchatAPI.addPeerListUpdatedListener(() => {
             BitchatAPI.getConnectedPeers().then((peerMap) => {
-                setPeers(peerMap);
+                updatePeersFromMap(peerMap);
             }).catch(() => {});
         });
 
@@ -320,14 +398,14 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         });
 
         subscriptionsRef.current = [msgSub, peerConnSub, peerDiscSub, peerListSub, ackSub, statusSub];
-    }, [peers, settings.displayName, nickname]);
+    }, [peers, settings, nickname]);
 
     const startMesh = useCallback(async () => {
         if (isStartingRef.current) return;
         isStartingRef.current = true;
 
-        const name = settings.displayName || nickname;
-        if (!name) {
+        const name = getAppDisplayName({ ...settings, displayName: settings.displayName || nickname });
+        if (!name || name === '::' || !settings.displayName && !nickname) {
             isStartingRef.current = false;
             throw new Error('No display name set. Please set your name in Settings.');
         }
@@ -354,12 +432,34 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             setIsRunning(true);
             log.info(`Mesh started as "${name}"`);
             const peerMap = await BitchatAPI.getConnectedPeers();
-            setPeers(peerMap);
-            
+            updatePeersFromMap(peerMap);
+
+            // Fetch stored forwards & queued messages for pre-existing connected peers
+            for (const [pID, pNick] of Object.entries(peerMap)) {
+                RelayService.flushStoreForward(pNick, pID)
+                    .then((count) => {
+                        if (count > 0) log.info(`Forwarded ${count} stored messages to ${pNick}`);
+                    })
+                    .catch((e) => log.error('Store-forward flush failed:', e));
+                
+                // Flush offline queued messages
+                const queued = getQueuedMessagesForPeer(pNick);
+                queued.forEach(async (msg) => {
+                    try {
+                        await BitchatAPI.sendPrivateMessage(msg.content, pID, pNick);
+                        updateMessageStatus(msg.id, 'sent');
+                        setMessageVersion((v) => v + 1);
+                    } catch (e) {}
+                });
+            }
+
             // Initialize relay service
             RelayService.setIdentity(name, name); // Use nickname as peer ID for now
             RelayService.setEnabled(settings.relayEnabled);
+            RelayService.setStoreForwardEnabled(settings.storeForwardEnabled);
+            TopologyService.setIdentity(name, name);
             log.info(`Relay service ${settings.relayEnabled ? 'enabled' : 'disabled'}`);
+            log.info(`Store-and-forward ${settings.storeForwardEnabled ? 'enabled' : 'disabled'}`);
         } catch (error) {
             log.error('Failed to start mesh:', error);
             throw error instanceof Error ? error : new Error('Failed to start mesh.');
@@ -401,6 +501,14 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         }
     }, [isInitialised, refreshConversations]);
 
+    // Sync topology whenever peers change
+    useEffect(() => {
+        if (isRunning) {
+            TopologyService.updateDirectPeers(peers);
+            refreshTopology();
+        }
+    }, [peers, isRunning, refreshTopology]);
+
     // ─── Messaging ───────────────────────────────────────────
 
     const sendPrivateMessage = useCallback(
@@ -411,7 +519,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
             const stored: StoredMessage = {
                 id: generateId(),
-                sender: settings.displayName || nickname,
+                sender: getAppDisplayName(settings),
                 content: text,
                 timestamp: Date.now(),
                 isPrivate: true,
@@ -449,7 +557,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 }
             }
         },
-        [peers, nickname, settings.displayName, refreshConversations]
+        [peers, nickname, settings, refreshConversations]
     );
 
     const getMessagesForPeer = useCallback(
@@ -478,9 +586,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                     mentions
                 );
 
+                const senderName = getAppDisplayName(settings);
                 const stored: StoredMessage = {
                     id: generateId(),
-                    sender: settings.displayName || nickname,
+                    sender: senderName,
                     content: text,
                     timestamp: Date.now(),
                     isPrivate: false,
@@ -495,7 +604,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                     isPasswordProtected: false,
                     createdAt: Date.now(),
                     lastMessage: text,
-                    lastMessageSender: settings.displayName || nickname,
+                    lastMessageSender: senderName,
                     lastMessageTimestamp: stored.timestamp,
                     unreadCount: 0,
                     updatedAt: Date.now(),
@@ -508,7 +617,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 throw error;
             }
         },
-        [nickname, settings.displayName, refreshConversations]
+        [nickname, settings, refreshConversations]
     );
 
     const getChannelMessagesHandler = useCallback(
@@ -577,6 +686,17 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         [refreshConversations]
     );
 
+    // ─── SOS ─────────────────────────────────────────────────
+
+    const sendSOS = useCallback(async (message: string = '', coordinates?: { lat: number; lon: number } | null) => {
+        if (!isRunning) throw new Error('Mesh is not running');
+        await RelayService.sendSOS(message, peers, coordinates);
+    }, [isRunning, peers]);
+
+    const dismissSOS = useCallback(() => {
+        setActiveSOSAlert(null);
+    }, []);
+
     // ─── Settings ────────────────────────────────────────────
 
     const updateSettingsHandler = useCallback(
@@ -597,6 +717,10 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             if (update.relayEnabled !== undefined) {
                 RelayService.setEnabled(update.relayEnabled);
                 log.info(`Relay service ${update.relayEnabled ? 'enabled' : 'disabled'}`);
+            }
+            if (update.storeForwardEnabled !== undefined) {
+                RelayService.setStoreForwardEnabled(update.storeForwardEnabled);
+                log.info(`Store-and-forward ${update.storeForwardEnabled ? 'enabled' : 'disabled'}`);
             }
         },
         [isRunning]
@@ -619,7 +743,25 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 log.info('App foregrounded, syncing peers');
                 if (isRunning) {
                     BitchatAPI.getConnectedPeers().then((peerMap) => {
-                        setPeers(peerMap);
+                        updatePeersFromMap(peerMap);
+                        
+                        // Also flush when returning to active in case we reconnected
+                        for (const [pID, pNick] of Object.entries(peerMap)) {
+                            RelayService.flushStoreForward(pNick, pID)
+                                .then((count) => {
+                                    if (count > 0) log.info(`Forwarded ${count} stored messages to ${pNick} on resume`);
+                                })
+                                .catch((e) => log.error('Store-forward flush failed:', e));
+                            
+                            const queued = getQueuedMessagesForPeer(pNick);
+                            queued.forEach(async (msg) => {
+                                try {
+                                    await BitchatAPI.sendPrivateMessage(msg.content, pID, pNick);
+                                    updateMessageStatus(msg.id, 'sent');
+                                    setMessageVersion((v) => v + 1);
+                                } catch (e) {}
+                            });
+                        }
                     }).catch(() => {});
                 }
             }
@@ -676,6 +818,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         searchMessages: searchMessagesHandler,
         deleteMessage: deleteMessageHandler,
         clearHistory: clearHistoryHandler,
+        sendSOS,
+        activeSOSAlert,
+        dismissSOS,
+        topologyNodes,
+        topologyEdges,
         settings,
         updateSettings: updateSettingsHandler,
     }), [
@@ -701,6 +848,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         searchMessagesHandler,
         deleteMessageHandler,
         clearHistoryHandler,
+        sendSOS,
+        activeSOSAlert,
+        dismissSOS,
+        topologyNodes,
+        topologyEdges,
         settings,
         updateSettingsHandler,
     ]);

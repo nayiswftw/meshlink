@@ -8,11 +8,13 @@ import { Ionicons } from '@expo/vector-icons';
 interface ConnectionBannerProps {
     connectedPeers: number;
     isRunning: boolean;
+    relayEnabled?: boolean;
 }
 
 function ConnectionBannerInner({
     connectedPeers,
     isRunning,
+    relayEnabled = false,
 }: ConnectionBannerProps) {
     if (!isRunning) {
         return (
@@ -36,12 +38,21 @@ function ConnectionBannerInner({
                 className="mx-4 mt-1 mb-0.5 px-3 py-1.5 rounded-full flex-row items-center self-start"
                 style={{ backgroundColor: '#ECFDF5' }}
                 accessibilityRole="alert"
-                accessibilityLabel={`${connectedPeers} peer${connectedPeers !== 1 ? 's' : ''} connected`}
+                accessibilityLabel={`${connectedPeers} peer${connectedPeers !== 1 ? 's' : ''} connected${relayEnabled ? ', relay enabled' : ''}`}
             >
                 <View className="w-1.5 h-1.5 rounded-full bg-[#22C55E] mr-2" />
                 <Text className="text-[#059669] text-xs font-medium">
                     {connectedPeers} peer{connectedPeers !== 1 ? 's' : ''} online
                 </Text>
+                {relayEnabled && (
+                    <>
+                        <View className="w-0.5 h-3 bg-[#059669]/20 mx-2" />
+                        <Ionicons name="git-network-outline" size={12} color="#059669" />
+                        <Text className="text-[#059669] text-xs font-medium ml-1">
+                            Relay
+                        </Text>
+                    </>
+                )}
             </View>
         );
     }

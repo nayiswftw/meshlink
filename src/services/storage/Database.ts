@@ -97,9 +97,15 @@ export function hasMessage(id: string): boolean {
 }
 
 export function getPrivateMessagesForPeer(peerId: string): StoredMessage[] {
+    const conv = conversationsCache.find((c) => c.peerId === peerId || c.peerName === peerId);
+    const targetName = conv ? conv.peerName : peerId;
     return messagesCache
-        .filter((m) => m.isPrivate && m.senderPeerID === peerId)
+        .filter((m) => m.isPrivate && (!m.isMine ? m.sender === targetName : m.recipientName === targetName))
         .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+export function getQueuedMessagesForPeer(peerName: string): StoredMessage[] {
+    return messagesCache.filter((m) => m.isPrivate && m.isMine && m.recipientName === peerName && m.status === 'queued');
 }
 
 export function updateMessageStatus(id: string, status: StoredMessage['status']): void {
@@ -113,7 +119,7 @@ export function updateMessageStatus(id: string, status: StoredMessage['status'])
 // ─── Conversations ───────────────────────────────────────────────
 
 export function upsertConversation(conv: Conversation): void {
-    const idx = conversationsCache.findIndex((c) => c.peerId === conv.peerId);
+    const idx = conversationsCache.findIndex((c) => c.peerName === conv.peerName);
     if (idx >= 0) {
         const existing = conversationsCache[idx];
         conversationsCache[idx] = {
@@ -133,7 +139,7 @@ export function getConversations(): Conversation[] {
 }
 
 export function markConversationRead(peerId: string): void {
-    const idx = conversationsCache.findIndex((c) => c.peerId === peerId);
+    const idx = conversationsCache.findIndex((c) => c.peerId === peerId || c.peerName === peerId);
     if (idx >= 0) {
         conversationsCache[idx] = { ...conversationsCache[idx], unreadCount: 0 };
         persistConversations();
@@ -206,11 +212,13 @@ export function deleteMessage(messageId: string): boolean {
     persistMessages();
 
     // Update parent conversation/channel lastMessage
-    if (deleted.isPrivate && deleted.senderPeerID) {
-        const remaining = messagesCache
-            .filter((m) => m.isPrivate && m.senderPeerID === deleted.senderPeerID)
-            .sort((a, b) => b.timestamp - a.timestamp);
-        const convIdx = conversationsCache.findIndex((c) => c.peerId === deleted.senderPeerID);
+    if (deleted.isPrivate) {
+        // Find the peer name we are talking to
+        const peerName = deleted.isMine ? deleted.recipientName : deleted.sender;
+        const remaining = peerName ? messagesCache
+            .filter((m) => m.isPrivate && (!m.isMine ? m.sender === peerName : m.recipientName === peerName))
+            .sort((a, b) => b.timestamp - a.timestamp) : [];
+        const convIdx = conversationsCache.findIndex((c) => c.peerName === peerName);
         if (convIdx >= 0) {
             conversationsCache[convIdx] = {
                 ...conversationsCache[convIdx],
@@ -236,4 +244,42 @@ export function deleteMessage(messageId: string): boolean {
     }
 
     return true;
+}
+
+export function clearChatHistory(id: string, isChannel: boolean): boolean {
+    const originalLength = messagesCache.length;
+    if (isChannel) {
+        messagesCache = messagesCache.filter((m) => m.isPrivate || m.channel !== id);
+        const chanIdx = channelsCache.findIndex((c) => c.name === id);
+        if (chanIdx >= 0) {
+            channelsCache[chanIdx] = {
+                ...channelsCache[chanIdx],
+                lastMessage: '',
+                lastMessageTimestamp: 0,
+            };
+            persistChannels();
+        }
+    } else {
+        // Look up conversation by peerId or peerName to find the stable name
+        const conv = conversationsCache.find((c) => c.peerId === id || c.peerName === id);
+        const targetName = conv ? conv.peerName : id;
+        messagesCache = messagesCache.filter(
+            (m) => !m.isPrivate || (!m.isMine ? m.sender !== targetName : m.recipientName !== targetName)
+        );
+        const convIdx = conv ? conversationsCache.indexOf(conv) : -1;
+        if (convIdx >= 0) {
+            conversationsCache[convIdx] = {
+                ...conversationsCache[convIdx],
+                lastMessage: '',
+                lastMessageTimestamp: 0,
+            };
+            persistConversations();
+        }
+    }
+    
+    if (messagesCache.length !== originalLength) {
+        persistMessages();
+        return true;
+    }
+    return false;
 }

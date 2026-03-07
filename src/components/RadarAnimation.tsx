@@ -1,33 +1,32 @@
 /**
  * RadarAnimation — Pulsing radar effect for the peer discovery screen.
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Animated, Easing } from 'react-native';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { View, Animated, Easing, TouchableOpacity, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface RadarAnimationProps {
     isActive: boolean;
     size?: number;
+    peers?: { id: string; nickname: string }[];
+    onPeerPress?: (id: string, nickname: string) => void;
 }
 
 export default function RadarAnimation({
     isActive,
     size = 200,
+    peers = [],
+    onPeerPress,
 }: RadarAnimationProps) {
     const pulse1 = useRef(new Animated.Value(0)).current;
     const pulse2 = useRef(new Animated.Value(0)).current;
     const pulse3 = useRef(new Animated.Value(0)).current;
-
-    // Chat bubbles state
-    const [bubbles, setBubbles] = useState<{ id: number; x: number; y: number; scale: Animated.Value; opacity: Animated.Value }[]>([]);
-    const bubbleIdCounter = useRef(0);
 
     useEffect(() => {
         if (!isActive) {
             pulse1.setValue(0);
             pulse2.setValue(0);
             pulse3.setValue(0);
-            setBubbles([]);
             return;
         }
 
@@ -57,59 +56,12 @@ export default function RadarAnimation({
         anim2.start();
         anim3.start();
 
-        // Chat bubble popping logic
-        const interval = setInterval(() => {
-            const angle = Math.random() * Math.PI * 2;
-            const distance = (Math.random() * (size / 2 - 20)) + 20;
-            const x = Math.cos(angle) * distance;
-            const y = Math.sin(angle) * distance;
-            
-            const scale = new Animated.Value(0);
-            const opacity = new Animated.Value(0);
-            
-            const id = bubbleIdCounter.current++;
-            
-            setBubbles(prev => [...prev.slice(-4), { id, x, y, scale, opacity }]);
-            
-            Animated.sequence([
-                Animated.parallel([
-                    Animated.spring(scale, {
-                        toValue: 1,
-                        friction: 4,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(opacity, {
-                        toValue: 1,
-                        duration: 300,
-                        useNativeDriver: true,
-                    })
-                ]),
-                Animated.delay(1000),
-                Animated.parallel([
-                    Animated.timing(scale, {
-                        toValue: 0.5,
-                        duration: 300,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(opacity, {
-                        toValue: 0,
-                        duration: 300,
-                        useNativeDriver: true,
-                    })
-                ])
-            ]).start(() => {
-                setBubbles(prev => prev.filter(b => b.id !== id));
-            });
-
-        }, 800);
-
         return () => {
             anim1.stop();
             anim2.stop();
             anim3.stop();
-            clearInterval(interval);
         };
-    }, [isActive, size]);
+    }, [isActive]);
 
     const renderRing = (anim: Animated.Value) => {
         const scale = anim.interpolate({
@@ -123,6 +75,7 @@ export default function RadarAnimation({
 
         return (
             <Animated.View
+                pointerEvents="none"
                 style={{
                     position: 'absolute',
                     width: size,
@@ -137,6 +90,53 @@ export default function RadarAnimation({
         );
     };
 
+    // Calculate pseudo-random positions using ID and resolve collisions
+    const peerPositions = useMemo(() => {
+        const radius = size / 2;
+        const placedPositions: Array<{ x: number; y: number }> = [];
+        const MIN_DIST = 55; // Provide enough spacing so bubbles and text don't overlap
+
+        return peers.map(peer => {
+            let hash = 0;
+            for (let i = 0; i < peer.id.length; i++) {
+                hash = (hash << 5) - hash + peer.id.charCodeAt(i);
+                hash |= 0;
+            }
+            
+            let angle = Math.abs(hash % 360) * (Math.PI / 180);
+            const maxDist = Math.max(1, radius - 45); // leave room for edges
+            let distance = 25 + Math.abs((hash >> 4) % maxDist);
+
+            let x = Math.cos(angle) * distance;
+            let y = Math.sin(angle) * distance;
+
+            // Simple collision avoidance
+            let attempts = 0;
+            let collision = true;
+            while (collision && attempts < 30) {
+                collision = false;
+                for (const pos of placedPositions) {
+                    const dx = pos.x - x;
+                    const dy = pos.y - y;
+                    if (Math.sqrt(dx * dx + dy * dy) < MIN_DIST) {
+                        collision = true;
+                        // Nudge angle and recalculate
+                        angle += Math.PI / 4; // Shift by 45 degrees
+                        distance = Math.min(radius - 35, distance + 10);
+                        x = Math.cos(angle) * distance;
+                        y = Math.sin(angle) * distance;
+                        break;
+                    }
+                }
+                attempts++;
+            }
+
+            placedPositions.push({ x, y });
+
+            return { ...peer, x, y };
+        });
+    }, [peers, size]);
+
     return (
         <View
             style={{
@@ -150,31 +150,52 @@ export default function RadarAnimation({
             {renderRing(pulse2)}
             {renderRing(pulse3)}
 
-            {/* Popping Chat Bubbles */}
-            {bubbles.map(bubble => (
-                <Animated.View
-                    key={bubble.id}
+            {/* Found Peers as interactive Chat Bubbles */}
+            {peerPositions.map((peer, index) => (
+                <TouchableOpacity
+                    key={peer.id}
+                    onPress={() => onPeerPress?.(peer.id, peer.nickname)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    activeOpacity={0.75}
                     style={{
                         position: 'absolute',
                         transform: [
-                            { translateX: bubble.x },
-                            { translateY: bubble.y },
-                            { scale: bubble.scale }
+                            { translateX: peer.x },
+                            { translateY: peer.y - 12 } // slightly offset up
                         ],
-                        opacity: bubble.opacity,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10 + index,
                     }}
                 >
                     <Ionicons 
-                        name={bubble.id % 2 === 0 ? "chatbubble" : "chatbubble-ellipses"} 
-                        size={24} 
+                        name="chatbubble-ellipses" 
+                        size={28} 
                         color="#059669" 
                     />
-                </Animated.View>
+                    <Text 
+                        style={{ 
+                            position: 'absolute', 
+                            top: 28, 
+                            fontSize: 10, 
+                            fontWeight: 'bold', 
+                            color: '#111827',
+                            backgroundColor: 'rgba(255,255,255,0.8)',
+                            paddingHorizontal: 4,
+                            borderRadius: 4,
+                            overflow: 'hidden',
+                        }}
+                        numberOfLines={1}
+                    >
+                        {peer.nickname || 'Unknown'}
+                    </Text>
+                </TouchableOpacity>
             ))}
 
             {/* Center dot */}
             <View
                 className="w-4 h-4 rounded-full bg-[#059669]"
+                pointerEvents="none"
                 style={{
                     shadowColor: '#059669',
                     shadowOffset: { width: 0, height: 0 },

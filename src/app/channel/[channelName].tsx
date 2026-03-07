@@ -11,6 +11,7 @@ import {
     FlatList,
     KeyboardAvoidingView,
     Platform,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack } from 'expo-router';
@@ -33,6 +34,7 @@ export default function ChannelChatScreen() {
         connectedPeerCount,
         messageVersion,
         deleteMessage,
+        clearHistory,
     } = useMesh();
     const { showToast } = useToast();
 
@@ -111,7 +113,29 @@ export default function ChannelChatScreen() {
                     ),
                     headerRight: () => (
                         <View className="flex-row items-center mr-2">
-                            <TouchableOpacity className="w-8 h-8 rounded-full bg-[#FFFFFF] items-center justify-center" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                            <TouchableOpacity 
+                                onPress={() => {
+                                    Alert.alert(
+                                        'Channel Options',
+                                        'What would you like to do?',
+                                        [
+                                            { text: 'Cancel', style: 'cancel' },
+                                            {
+                                                text: 'Clear Chat History',
+                                                style: 'destructive',
+                                                onPress: () => {
+                                                    if (decodedName) {
+                                                        clearHistory(decodedName, true);
+                                                        loadMessages();
+                                                    }
+                                                },
+                                            },
+                                        ]
+                                    );
+                                }}
+                                className="w-8 h-8 rounded-full bg-[#FFFFFF] items-center justify-center" 
+                                style={{ borderWidth: 1, borderColor: '#E5E7EB' }}
+                            >
                                 <Ionicons name="ellipsis-vertical" size={16} color="#6B7280" />
                             </TouchableOpacity>
                         </View>

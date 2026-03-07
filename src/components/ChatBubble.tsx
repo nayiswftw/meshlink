@@ -10,7 +10,7 @@ interface ChatBubbleProps {
     content: string;
     timestamp: number;
     isMine: boolean;
-    status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+    status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'queued';
     messageId?: string;
     onDelete?: (messageId: string) => void;
     senderName?: string;
@@ -36,6 +36,8 @@ function getStatusIcon(
             return { name: 'checkmark-done', color: '#22C55E' };
         case 'failed':
             return { name: 'alert-circle-outline', color: '#EF4444' };
+        case 'queued':
+            return { name: 'time-outline', color: '#F59E0B' };
         default:
             return null;
     }
@@ -54,7 +56,7 @@ function ChatBubbleInner({
     const statusIcon = isMine ? getStatusIcon(status) : null;
 
     const handleLongPress = () => {
-        if (!isMine || !messageId || !onDelete) return;
+        if (!messageId || !onDelete) return;
         Alert.alert(
             'Delete Message',
             'Are you sure you want to delete this message?',
@@ -69,8 +71,8 @@ function ChatBubbleInner({
         );
     };
 
-    const Wrapper = isMine && messageId && onDelete ? TouchableOpacity : View;
-    const wrapperProps = isMine && messageId && onDelete
+    const Wrapper = messageId && onDelete ? TouchableOpacity : View;
+    const wrapperProps = messageId && onDelete
         ? { onLongPress: handleLongPress, activeOpacity: 0.8 }
         : {};
 
@@ -91,7 +93,7 @@ function ChatBubbleInner({
                 </View>
                 <Wrapper
                     {...(wrapperProps as any)}
-                    className="flex-1"
+                    className="flex-shrink"
                     accessibilityRole="text"
                     accessibilityLabel={`${senderName}: ${content}. ${formatTime(timestamp)}`}
                 >

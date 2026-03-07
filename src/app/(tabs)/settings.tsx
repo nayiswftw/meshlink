@@ -59,7 +59,7 @@ function SettingsRow({
 }
 
 export default function SettingsScreen() {
-    const { nickname, settings, updateSettings, isRunning, startMesh, stopMesh } = useMesh();
+    const { nickname, settings, updateSettings } = useMesh();
     const { showToast } = useToast();
     const [editingName, setEditingName] = useState(false);
     const [nameInput, setNameInput] = useState(settings.displayName);
@@ -70,22 +70,6 @@ export default function SettingsScreen() {
             showToast('Display name updated', 'success');
         }
         setEditingName(false);
-    };
-
-    const handleStartMesh = async () => {
-        try {
-            await startMesh();
-        } catch (e) {
-            showToast(e instanceof Error ? e.message : 'Failed to start mesh service', 'error');
-        }
-    };
-
-    const handleStopMesh = async () => {
-        try {
-            await stopMesh();
-        } catch {
-            showToast('Failed to stop mesh service', 'error');
-        }
     };
 
     return (
@@ -142,33 +126,8 @@ export default function SettingsScreen() {
                     </SettingsRow>
                 </SettingsSection>
 
-                {/* Mesh Network */}
-                <SettingsSection title="Mesh Network">
-                    <SettingsRow
-                        icon="radio-outline"
-                        iconColor={isRunning ? '#059669' : '#EF4444'}
-                        label="Mesh Service"
-                    >
-                        {isRunning ? (
-                            <TouchableOpacity
-                                onPress={handleStopMesh}
-                                accessibilityRole="button"
-                                accessibilityLabel="Stop mesh service"
-                                className="bg-[#FEF2F2] rounded-lg px-3 py-1.5"
-                            >
-                                <Text className="text-[#EF4444] text-xs font-semibold">Stop</Text>
-                            </TouchableOpacity>
-                        ) : (
-                            <TouchableOpacity
-                                onPress={handleStartMesh}
-                                accessibilityRole="button"
-                                accessibilityLabel="Start mesh service"
-                                className="bg-[#059669] rounded-lg px-3 py-1.5"
-                            >
-                                <Text className="text-white text-xs font-semibold">Start</Text>
-                            </TouchableOpacity>
-                        )}
-                    </SettingsRow>
+                {/* Notifications */}
+                <SettingsSection title="Notifications">
                     <SettingsRow icon="notifications-outline" iconColor="#F59E0B" label="Notifications" last>
                         <Switch
                             value={settings.notificationsEnabled}
@@ -179,6 +138,26 @@ export default function SettingsScreen() {
                             thumbColor="#FFFFFF"
                         />
                     </SettingsRow>
+                </SettingsSection>
+
+                {/* Relay Settings */}
+                <SettingsSection title="Mesh Network">
+                    <SettingsRow icon="git-network-outline" iconColor="#8B5CF6" label="Message Relay">
+                        <Switch
+                            value={settings.relayEnabled}
+                            onValueChange={(v) =>
+                                updateSettings({ relayEnabled: v })
+                            }
+                            trackColor={{ false: '#E5E7EB', true: '#8B5CF6' }}
+                            thumbColor="#FFFFFF"
+                        />
+                    </SettingsRow>
+                    <View className="px-4 py-2 bg-[#F9FAFB]">
+                        <Text className="text-[#6B7280] text-xs leading-relaxed">
+                            When enabled, your device will forward messages through the mesh network,
+                            extending reach to peers beyond direct Bluetooth range.
+                        </Text>
+                    </View>
                 </SettingsSection>
 
                 {/* About */}

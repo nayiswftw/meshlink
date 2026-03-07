@@ -22,6 +22,7 @@ import {
     saveMessage,
     hasMessage,
     getPrivateMessagesForPeer,
+    getQueuedMessagesForPeer,
     upsertConversation,
     getConversations as dbGetConversations,
     markConversationRead,
@@ -34,6 +35,7 @@ import {
     deleteChannel as dbDeleteChannel,
     searchMessages as dbSearchMessages,
     deleteMessage as dbDeleteMessage,
+    clearChatHistory as dbClearChatHistory,
 } from '../services/storage/Database';
 import {
     getSettings,
@@ -42,6 +44,7 @@ import {
 } from '../services/storage/AppState';
 import { requestBluetoothPermissions } from '../services/Permissions';
 import { notifyIncomingMessage, requestNotificationPermissions } from '../services/Notifications';
+import RelayService from '../services/RelayService';
 import type { AppSettings, Conversation, StoredMessage, Channel } from '../types';
 
 const log = createLogger('MeshContext');
@@ -98,6 +101,7 @@ interface MeshContextType {
     // Search & deletion
     searchMessages: (query: string) => StoredMessage[];
     deleteMessage: (messageId: string) => boolean;
+    clearHistory: (id: string, isChannel: boolean) => void;
 
     // Settings
     settings: AppSettings;
@@ -121,6 +125,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     const subscriptionsRef = useRef<Subscription[]>([]);
     const appStateRef = useRef<AppStateStatus>(RNAppState.currentState);
     const notificationsEnabledRef = useRef(settings.notificationsEnabled);
+    const isStartingRef = useRef(false);
 
     // Keep the ref in sync
     useEffect(() => {
@@ -151,8 +156,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         subscriptionsRef.current.forEach((s) => s.remove());
         subscriptionsRef.current = [];
 
+        // Get current display name for relay checks
+        const myDisplayName = settings.displayName || nickname;
+
         // Incoming messages
-        const msgSub = BitchatAPI.addMessageListener((message: BitchatMessage) => {
+        const msgSub = BitchatAPI.addMessageListener(async (message: BitchatMessage) => {
             log.info(`Message from ${message.sender}: ${message.content.slice(0, 50)}`);
 
             // Deduplicate — mesh networks may deliver the same message twice
@@ -160,23 +168,58 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
             const isBackgrounded = appStateRef.current !== 'active';
 
-            if (message.isPrivate && message.senderPeerID) {
+            // Parse relay metadata if present
+            const { metadata: relayMetadata, actualContent } = RelayService.parseRelayMetadata(message.content);
+
+            // Determine if this message is for us
+            // For private messages, check if we're the destination (if specified in metadata)
+            // For broadcast/channel messages, they're always for everyone
+            const isForMe = message.isPrivate
+                ? !relayMetadata
+                    || !relayMetadata.destinationNickname
+                    || relayMetadata.destinationNickname === myDisplayName
+                : true;
+
+            // Process relay logic (forward if not for us)
+            if (relayMetadata && !isForMe) {
+                try {
+                    const wasRelayed = await RelayService.processIncomingMessage(
+                        message,
+                        peers,
+                        isForMe
+                    );
+                    if (wasRelayed) {
+                        log.info(`Relayed message ${message.id} from ${relayMetadata.originNickname}`);
+                    }
+                } catch (error) {
+                    log.error('Relay processing failed:', error);
+                }
+                // Don't store forwarded messages that aren't for us
+                return;
+            }
+
+            // Use actual content (without relay metadata) for display and storage
+            const displayContent = actualContent;
+            const displaySender = relayMetadata ? relayMetadata.originNickname : message.sender;
+            const displaySenderPeerID = relayMetadata ? relayMetadata.originPeerID : message.senderPeerID;
+
+            if (message.isPrivate && displaySenderPeerID) {
                 const stored: StoredMessage = {
                     id: message.id,
-                    sender: message.sender,
-                    content: message.content,
+                    sender: displaySender,
+                    content: displayContent,
                     timestamp: message.timestamp,
                     isPrivate: true,
-                    senderPeerID: message.senderPeerID,
+                    senderPeerID: displaySenderPeerID,
                     isMine: false,
                     status: 'delivered',
                 };
                 saveMessage(stored);
 
                 upsertConversation({
-                    peerId: message.senderPeerID,
-                    peerName: message.sender,
-                    lastMessage: message.content,
+                    peerId: displaySenderPeerID,
+                    peerName: displaySender,
+                    lastMessage: displayContent,
                     lastMessageTimestamp: message.timestamp,
                     unreadCount: 1,
                     updatedAt: Date.now(),
@@ -186,14 +229,14 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 setMessageVersion((v) => v + 1);
 
                 if (isBackgrounded && notificationsEnabledRef.current) {
-                    notifyIncomingMessage(message.sender, message.content);
+                    notifyIncomingMessage(displaySender, displayContent);
                 }
             } else if (!message.isPrivate && message.channel) {
                 // Channel message
                 const stored: StoredMessage = {
                     id: message.id,
-                    sender: message.sender,
-                    content: message.content,
+                    sender: displaySender,
+                    content: displayContent,
                     timestamp: message.timestamp,
                     isPrivate: false,
                     channel: message.channel,
@@ -207,8 +250,8 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                     name: message.channel,
                     isPasswordProtected: false,
                     createdAt: Date.now(),
-                    lastMessage: message.content,
-                    lastMessageSender: message.sender,
+                    lastMessage: displayContent,
+                    lastMessageSender: displaySender,
                     lastMessageTimestamp: message.timestamp,
                     unreadCount: 1,
                     updatedAt: Date.now(),
@@ -218,15 +261,30 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 setMessageVersion((v) => v + 1);
 
                 if (isBackgrounded && notificationsEnabledRef.current) {
-                    notifyIncomingMessage(message.sender, message.content, message.channel);
+                    notifyIncomingMessage(displaySender, displayContent, message.channel);
                 }
             }
         });
 
         // Peer connected
         const peerConnSub = BitchatAPI.addPeerConnectedListener(({ peerID, nickname: peerNick }) => {
-            log.info(`Peer connected: ${peerNick} (${peerID})`);
-            setPeers((prev) => ({ ...prev, [peerID]: peerNick }));
+            setPeers((prev) => {
+                if (prev[peerID] === peerNick) return prev; // already tracked
+                log.info(`Peer connected: ${peerNick} (${peerID})`);
+                return { ...prev, [peerID]: peerNick };
+            });
+
+            // Flush offline queued messages
+            const queued = getQueuedMessagesForPeer(peerNick);
+            queued.forEach(async (msg) => {
+                try {
+                    await BitchatAPI.sendPrivateMessage(msg.content, peerID, peerNick);
+                    updateMessageStatus(msg.id, 'sent');
+                    setMessageVersion((v) => v + 1);
+                } catch (e) {
+                    log.error(`Failed to flush message ${msg.id}:`, e);
+                }
+            });
         });
 
         // Peer disconnected
@@ -262,16 +320,21 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         });
 
         subscriptionsRef.current = [msgSub, peerConnSub, peerDiscSub, peerListSub, ackSub, statusSub];
-    }, []);
+    }, [peers, settings.displayName, nickname]);
 
     const startMesh = useCallback(async () => {
+        if (isStartingRef.current) return;
+        isStartingRef.current = true;
+
         const name = settings.displayName || nickname;
         if (!name) {
+            isStartingRef.current = false;
             throw new Error('No display name set. Please set your name in Settings.');
         }
 
         const permStatus = await requestBluetoothPermissions();
         if (permStatus !== 'granted') {
+            isStartingRef.current = false;
             throw new Error(
                 permStatus === 'blocked'
                     ? 'Bluetooth permission blocked. Enable in device Settings.'
@@ -283,20 +346,27 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         requestNotificationPermissions().catch(() => {});
 
         try {
-            setupListeners();
             const started = await BitchatAPI.startServices(name);
             if (!started) {
-                throw new Error('Mesh service failed to start. Please try again.');
+                throw new Error('Mesh service failed to start. Make sure Bluetooth is enabled on your device.');
             }
+            setupListeners();
             setIsRunning(true);
             log.info(`Mesh started as "${name}"`);
             const peerMap = await BitchatAPI.getConnectedPeers();
             setPeers(peerMap);
+            
+            // Initialize relay service
+            RelayService.setIdentity(name, name); // Use nickname as peer ID for now
+            RelayService.setEnabled(settings.relayEnabled);
+            log.info(`Relay service ${settings.relayEnabled ? 'enabled' : 'disabled'}`);
         } catch (error) {
             log.error('Failed to start mesh:', error);
             throw error instanceof Error ? error : new Error('Failed to start mesh.');
+        } finally {
+            isStartingRef.current = false;
         }
-    }, [nickname, settings.displayName, setupListeners]);
+    }, [nickname, settings.displayName, settings.relayEnabled, setupListeners]);
 
     const stopMesh = useCallback(async () => {
         try {
@@ -313,7 +383,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
     // Auto-start mesh once initialized and we have a display name
     useEffect(() => {
-        if (isInitialised && settings.displayName && !isRunning) {
+        if (isInitialised && settings.displayName && !isRunning && !isStartingRef.current) {
             startMesh().catch((e) => log.warn('Auto-start failed:', e));
         }
     }, [isInitialised, settings.displayName, isRunning, startMesh]);
@@ -335,38 +405,51 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
     const sendPrivateMessage = useCallback(
         async (recipientPeerID: string, recipientNickname: string, text: string) => {
-            try {
-                await BitchatAPI.sendPrivateMessage(text, recipientPeerID, recipientNickname);
+            const activePeerId = Object.keys(peers).find(id => peers[id] === recipientNickname);
+            const isConnected = !!activePeerId;
+            const targetPeerId = activePeerId || recipientPeerID;
 
-                const stored: StoredMessage = {
-                    id: generateId(),
-                    sender: settings.displayName || nickname,
-                    content: text,
-                    timestamp: Date.now(),
-                    isPrivate: true,
-                    senderPeerID: recipientPeerID,
-                    isMine: true,
-                    status: 'sent',
-                };
-                saveMessage(stored);
+            const stored: StoredMessage = {
+                id: generateId(),
+                sender: settings.displayName || nickname,
+                content: text,
+                timestamp: Date.now(),
+                isPrivate: true,
+                recipientPeerID: targetPeerId,
+                recipientName: recipientNickname,
+                isMine: true,
+                status: isConnected ? 'sent' : 'queued',
+            };
+            saveMessage(stored);
 
-                upsertConversation({
-                    peerId: recipientPeerID,
-                    peerName: recipientNickname,
-                    lastMessage: text,
-                    lastMessageTimestamp: stored.timestamp,
-                    unreadCount: 0,
-                    updatedAt: Date.now(),
-                });
+            upsertConversation({
+                peerId: targetPeerId,
+                peerName: recipientNickname,
+                lastMessage: text,
+                lastMessageTimestamp: stored.timestamp,
+                unreadCount: 0,
+                updatedAt: Date.now(),
+            });
 
-                refreshConversations();
-                setMessageVersion((v) => v + 1);
-            } catch (error) {
-                log.error('Failed to send message:', error);
-                throw error;
+            refreshConversations();
+            setMessageVersion((v) => v + 1);
+
+            if (isConnected) {
+                try {
+                    await RelayService.sendWithRelay(
+                        text,
+                        true, // isPrivate
+                        targetPeerId,
+                        recipientNickname
+                    );
+                } catch (error) {
+                    log.error('Failed to send message:', error);
+                    updateMessageStatus(stored.id, 'failed');
+                    setMessageVersion((v) => v + 1);
+                }
             }
         },
-        [nickname, settings.displayName, refreshConversations]
+        [peers, nickname, settings.displayName, refreshConversations]
     );
 
     const getMessagesForPeer = useCallback(
@@ -386,7 +469,14 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     const sendChannelMessage = useCallback(
         async (channelName: string, text: string, mentions: string[] = []) => {
             try {
-                await BitchatAPI.sendMessage(text, mentions, channelName);
+                await RelayService.sendWithRelay(
+                    text,
+                    false, // not private
+                    undefined,
+                    undefined,
+                    channelName,
+                    mentions
+                );
 
                 const stored: StoredMessage = {
                     id: generateId(),
@@ -499,9 +589,17 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             setSettings(newSettings);
             if (update.displayName) {
                 setNickname(update.displayName);
+                // Update relay service identity if running
+                if (isRunning) {
+                    RelayService.setIdentity(update.displayName, update.displayName);
+                }
+            }
+            if (update.relayEnabled !== undefined) {
+                RelayService.setEnabled(update.relayEnabled);
+                log.info(`Relay service ${update.relayEnabled ? 'enabled' : 'disabled'}`);
             }
         },
-        []
+        [isRunning]
     );
 
     // ─── AppState Lifecycle ──────────────────────────────────
@@ -542,6 +640,18 @@ export function MeshProvider({ children }: { children: ReactNode }) {
 
     // ─── Provide ─────────────────────────────────────────────
 
+    const clearHistoryHandler = useCallback((id: string, isChannel: boolean) => {
+        const cleared = dbClearChatHistory(id, isChannel);
+        if (cleared) {
+            setMessageVersion((v) => v + 1);
+            if (isChannel) {
+                setChannels(dbGetChannels());
+            } else {
+                setConversations(dbGetConversations());
+            }
+        }
+    }, []);
+
     const value: MeshContextType = React.useMemo(() => ({
         nickname,
         isInitialised,
@@ -565,6 +675,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         messageVersion,
         searchMessages: searchMessagesHandler,
         deleteMessage: deleteMessageHandler,
+        clearHistory: clearHistoryHandler,
         settings,
         updateSettings: updateSettingsHandler,
     }), [
@@ -589,6 +700,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         messageVersion,
         searchMessagesHandler,
         deleteMessageHandler,
+        clearHistoryHandler,
         settings,
         updateSettingsHandler,
     ]);

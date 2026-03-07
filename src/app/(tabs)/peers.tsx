@@ -100,7 +100,12 @@ export default function PeersScreen() {
                     ListHeaderComponent={
                         isRunning ? (
                             <View className="items-center py-8 mb-4">
-                                <RadarAnimation isActive size={140} />
+                                <RadarAnimation 
+                                    isActive 
+                                    size={180} 
+                                    peers={peerEntries} 
+                                    onPeerPress={handlePeerPress} 
+                                />
                                 <Text className="text-[#9CA3AF] text-sm mt-6 font-medium">
                                     Scanning for more devices...
                                 </Text>

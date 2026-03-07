@@ -140,7 +140,7 @@ function CustomTabBar({ state, navigation, onPlusPress }: any) {
 }
 
 export default function TabLayout() {
-    const { connectedPeerCount, isRunning, joinChannel } = useMesh();
+    const { connectedPeerCount, isRunning, joinChannel, settings } = useMesh();
     const insets = useSafeAreaInsets();
     const [showCreateChannel, setShowCreateChannel] = useState(false);
 
@@ -149,6 +149,7 @@ export default function TabLayout() {
             <ConnectionBanner
                 connectedPeers={connectedPeerCount}
                 isRunning={isRunning}
+                relayEnabled={settings.relayEnabled}
             />
             <Tabs
                 tabBar={(props) => (

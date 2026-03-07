@@ -11,6 +11,7 @@ import {
     FlatList,
     KeyboardAvoidingView,
     Platform,
+    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack, router } from 'expo-router';
@@ -29,9 +30,11 @@ export default function ChatScreen() {
         sendPrivateMessage,
         markRead,
         peers,
+        conversations,
         refreshConversations,
         messageVersion,
         deleteMessage,
+        clearHistory,
     } = useMesh();
     const { showToast } = useToast();
 
@@ -40,17 +43,34 @@ export default function ChatScreen() {
     const [isSending, setIsSending] = useState(false);
     const flatListRef = useRef<FlatList>(null);
 
-    // Get peer info from the PeerInfo map
-    const peerNickname = peerId ? (peers[peerId] ?? 'Unknown') : 'Unknown';
+    // Get peer info — try active peers first, then fall back to stored conversation name
+    const conv = peerId ? conversations.find((c) => c.peerId === peerId || c.peerName === peerId) : undefined;
+    const peerNickname = peerId ? (peers[peerId] ?? conv?.peerName ?? 'Unknown') : 'Unknown';
     const color = peerColor(peerId || '');
-    const isConnected = peerId ? peerId in peers : false;
+    const activePeerId = Object.keys(peers).find(id => peers[id] === peerNickname);
+    const isConnected = !!activePeerId;
 
     // Load messages
     const loadMessages = useCallback(() => {
         if (!peerId) return;
-        const msgs = getMessagesForPeer(peerId);
+        const aliases = Array.from(
+            new Set(
+                [peerId, peerNickname, conv?.peerName]
+                    .map((v) => (v ?? '').trim())
+                    .filter((v) => v.length > 0 && v !== 'Unknown')
+            )
+        );
+
+        const merged = new Map<string, StoredMessage>();
+        aliases.forEach((alias) => {
+            getMessagesForPeer(alias).forEach((msg) => {
+                merged.set(msg.id, msg);
+            });
+        });
+
+        const msgs = Array.from(merged.values()).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(msgs);
-    }, [peerId, getMessagesForPeer]);
+    }, [peerId, peerNickname, conv?.peerName, getMessagesForPeer]);
 
     useEffect(() => {
         loadMessages();
@@ -75,7 +95,7 @@ export default function ChatScreen() {
         setIsSending(true);
 
         try {
-            await sendPrivateMessage(peerId, peerNickname, text);
+            await sendPrivateMessage(activePeerId || peerId, peerNickname, text);
             loadMessages();
         } catch (error) {
             showToast('Failed to send message', 'error');
@@ -118,7 +138,29 @@ export default function ChatScreen() {
                     ),
                     headerRight: () => (
                         <View className="flex-row items-center mr-2">
-                            <TouchableOpacity className="w-8 h-8 rounded-full bg-[#FFFFFF] items-center justify-center" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                            <TouchableOpacity 
+                                onPress={() => {
+                                    Alert.alert(
+                                        'Chat Options',
+                                        'What would you like to do?',
+                                        [
+                                            { text: 'Cancel', style: 'cancel' },
+                                            {
+                                                text: 'Clear Chat History',
+                                                style: 'destructive',
+                                                onPress: () => {
+                                                    if (peerId) {
+                                                        clearHistory(peerId, false);
+                                                        loadMessages();
+                                                    }
+                                                },
+                                            },
+                                        ]
+                                    );
+                                }}
+                                className="w-8 h-8 rounded-full bg-[#FFFFFF] items-center justify-center" 
+                                style={{ borderWidth: 1, borderColor: '#E5E7EB' }}
+                            >
                                 <Ionicons name="ellipsis-vertical" size={16} color="#6B7280" />
                             </TouchableOpacity>
                         </View>

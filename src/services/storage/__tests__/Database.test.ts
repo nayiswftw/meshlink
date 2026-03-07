@@ -107,6 +107,7 @@ describe('Database', () => {
     describe('saveMessage & getPrivateMessagesForPeer', () => {
         it('saves and retrieves private messages by peerId', async () => {
             const db = await loadDb();
+            db.upsertConversation(makeConversation({ peerId: 'peer-alice', peerName: 'Alice' }));
             db.saveMessage(makeMessage({ isPrivate: true, isMine: false }));
 
             const result = db.getPrivateMessagesForPeer('peer-alice');
@@ -116,6 +117,7 @@ describe('Database', () => {
 
         it('updates existing message by id', async () => {
             const db = await loadDb();
+            db.upsertConversation(makeConversation({ peerId: 'peer-alice', peerName: 'Alice' }));
             db.saveMessage(makeMessage({ id: 'x', content: 'v1' }));
             db.saveMessage(makeMessage({ id: 'x', content: 'v2' }));
 
@@ -126,6 +128,7 @@ describe('Database', () => {
 
         it('sorts messages by timestamp', async () => {
             const db = await loadDb();
+            db.upsertConversation(makeConversation({ peerId: 'peer-alice', peerName: 'Alice' }));
             db.saveMessage(makeMessage({ id: '2', timestamp: 2000 }));
             db.saveMessage(makeMessage({ id: '1', timestamp: 1000 }));
             db.saveMessage(makeMessage({ id: '3', timestamp: 3000 }));
@@ -138,6 +141,7 @@ describe('Database', () => {
     describe('updateMessageStatus', () => {
         it('updates the status of an existing message', async () => {
             const db = await loadDb();
+            db.upsertConversation(makeConversation({ peerId: 'peer-alice', peerName: 'Alice' }));
             db.saveMessage(makeMessage({ id: 'msg-1', status: 'sending' }));
             db.updateMessageStatus('msg-1', 'delivered');
 
@@ -183,9 +187,9 @@ describe('Database', () => {
     describe('getConversations', () => {
         it('returns sorted by updatedAt descending', async () => {
             const db = await loadDb();
-            db.upsertConversation(makeConversation({ peerId: 'old', updatedAt: 1000 }));
-            db.upsertConversation(makeConversation({ peerId: 'new', updatedAt: 3000 }));
-            db.upsertConversation(makeConversation({ peerId: 'mid', updatedAt: 2000 }));
+            db.upsertConversation(makeConversation({ peerId: 'old', peerName: 'OldPeer', updatedAt: 1000 }));
+            db.upsertConversation(makeConversation({ peerId: 'new', peerName: 'NewPeer', updatedAt: 3000 }));
+            db.upsertConversation(makeConversation({ peerId: 'mid', peerName: 'MidPeer', updatedAt: 2000 }));
 
             const convs = db.getConversations();
             expect(convs.map((c) => c.peerId)).toEqual(['new', 'mid', 'old']);
@@ -339,6 +343,7 @@ describe('Database', () => {
     describe('deleteMessage', () => {
         it('removes a message by id', async () => {
             const db = await loadDb();
+            db.upsertConversation(makeConversation({ peerId: 'peer-alice', peerName: 'Alice' }));
             db.saveMessage(makeMessage({ id: 'x', content: 'doomed' }));
             expect(db.getPrivateMessagesForPeer('peer-alice')).toHaveLength(1);
 
@@ -354,9 +359,9 @@ describe('Database', () => {
 
         it('updates parent conversation lastMessage after deletion', async () => {
             const db = await loadDb();
-            db.saveMessage(makeMessage({ id: '1', content: 'first', timestamp: 1000, senderPeerID: 'p1' }));
-            db.saveMessage(makeMessage({ id: '2', content: 'second', timestamp: 2000, senderPeerID: 'p1' }));
-            db.upsertConversation(makeConversation({ peerId: 'p1', lastMessage: 'second' }));
+            db.saveMessage(makeMessage({ id: '1', content: 'first', timestamp: 1000, sender: 'Alice' }));
+            db.saveMessage(makeMessage({ id: '2', content: 'second', timestamp: 2000, sender: 'Alice' }));
+            db.upsertConversation(makeConversation({ peerId: 'p1', peerName: 'Alice', lastMessage: 'second' }));
 
             db.deleteMessage('2');
             const conv = db.getConversations().find((c) => c.peerId === 'p1');
@@ -365,8 +370,8 @@ describe('Database', () => {
 
         it('clears conversation lastMessage when all messages deleted', async () => {
             const db = await loadDb();
-            db.saveMessage(makeMessage({ id: '1', content: 'only', senderPeerID: 'p1' }));
-            db.upsertConversation(makeConversation({ peerId: 'p1', lastMessage: 'only' }));
+            db.saveMessage(makeMessage({ id: '1', content: 'only', sender: 'Alice' }));
+            db.upsertConversation(makeConversation({ peerId: 'p1', peerName: 'Alice', lastMessage: 'only' }));
 
             db.deleteMessage('1');
             const conv = db.getConversations().find((c) => c.peerId === 'p1');

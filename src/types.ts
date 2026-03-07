@@ -46,8 +46,10 @@ export interface StoredMessage {
     isPrivate: boolean;
     channel?: string;
     senderPeerID?: string;
+    recipientPeerID?: string;
+    recipientName?: string;
     isMine: boolean;
-    status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+    status: 'sending' | 'sent' | 'delivered' | 'read' | 'failed' | 'queued';
 }
 
 // ─── App Settings ────────────────────────────────────────────────
@@ -56,10 +58,12 @@ export interface AppSettings {
     displayName: string;
     notificationsEnabled: boolean;
     onboardingComplete: boolean;
+    relayEnabled: boolean;  // Enable message relay/forwarding
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
     displayName: '',
     notificationsEnabled: true,
     onboardingComplete: false,
+    relayEnabled: true,
 };

@@ -2,7 +2,7 @@
  * Chats tab — Redesigned with horizontal filter pills, online peer avatars,
  * and section-based conversation/channel layout.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
     View,
     Text,
@@ -194,25 +194,29 @@ function ChannelItem({ channel }: { channel: Channel }) {
 
 /* ─── Main Screen ─────────────────────────────────────────── */
 export default function ChatsScreen() {
-    const { conversations, channels, joinChannel, peers } = useMesh();
+    const { conversations, channels, joinChannel, peers, messageVersion, refreshConversations } = useMesh();
     const [showCreateChannel, setShowCreateChannel] = useState(false);
     const [filter, setFilter] = useState<'all' | 'direct' | 'channels'>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [showSearch, setShowSearch] = useState(false);
 
-    const hasContent = conversations.length > 0 || channels.length > 0;
+    // Keep list views in sync with real-time message updates.
+    useEffect(() => {
+        refreshConversations();
+    }, [messageVersion, refreshConversations]);
 
     // Online peers for avatar row
     const onlinePeers = useMemo(() => {
         return Object.entries(peers).map(([id, nick]) => {
-            const conv = conversations.find((c) => c.peerId === id);
+            const conv = conversations.find((c) => c.peerId === id || c.peerName === nick);
             return { id, name: nick, unread: conv?.unreadCount ?? 0 };
         });
     }, [peers, conversations]);
 
     // Filter and search
     const filteredConversations = useMemo(() => {
-        let list = conversations;
+        // Only show conversations that actually have messages (or are unread)
+        let list = conversations.filter(c => c.lastMessage !== '' || c.unreadCount > 0);
         if (searchQuery.trim()) {
             const q = searchQuery.toLowerCase();
             list = list.filter(
@@ -232,6 +236,8 @@ export default function ChatsScreen() {
         }
         return list;
     }, [channels, searchQuery]);
+
+    const hasContent = filteredConversations.length > 0 || channels.length > 0;
 
     const handleCreateOrJoin = async (channelName: string, password?: string) => {
         await joinChannel(channelName, password);

@@ -1,5 +1,5 @@
 /**
- * ChatBubble — Message bubble with timestamp and delivery status.
+ * ChatBubble — Message bubble with timestamp, delivery status, and optional sender avatar.
  * Supports long-press to delete when onDelete is provided.
  */
 import React from 'react';
@@ -13,6 +13,8 @@ interface ChatBubbleProps {
     status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
     messageId?: string;
     onDelete?: (messageId: string) => void;
+    senderName?: string;
+    senderColor?: string;
 }
 
 function formatTime(ts: number): string {
@@ -25,15 +27,15 @@ function getStatusIcon(
 ): { name: keyof typeof Ionicons.glyphMap; color: string } | null {
     switch (status) {
         case 'sending':
-            return { name: 'arrow-up-circle-outline', color: '#A0977D' };
+            return { name: 'arrow-up-circle-outline', color: '#9CA3AF' };
         case 'sent':
-            return { name: 'checkmark', color: '#A0977D' };
+            return { name: 'checkmark', color: '#9CA3AF' };
         case 'delivered':
-            return { name: 'checkmark-done', color: '#5C6B3C' };
+            return { name: 'checkmark-done', color: '#059669' };
         case 'read':
-            return { name: 'checkmark-done', color: '#4A7C59' };
+            return { name: 'checkmark-done', color: '#22C55E' };
         case 'failed':
-            return { name: 'alert-circle-outline', color: '#B85C4A' };
+            return { name: 'alert-circle-outline', color: '#EF4444' };
         default:
             return null;
     }
@@ -46,6 +48,8 @@ function ChatBubbleInner({
     status,
     messageId,
     onDelete,
+    senderName,
+    senderColor,
 }: ChatBubbleProps) {
     const statusIcon = isMine ? getStatusIcon(status) : null;
 
@@ -70,6 +74,46 @@ function ChatBubbleInner({
         ? { onLongPress: handleLongPress, activeOpacity: 0.8 }
         : {};
 
+    // Show inline avatar for received messages
+    if (!isMine && senderName) {
+        const avatarColor = senderColor || '#6366F1';
+        const initials = senderName.slice(0, 1).toUpperCase();
+        return (
+            <View className="flex-row items-end mb-2.5 self-start max-w-[85%]">
+                {/* Sender avatar */}
+                <View
+                    className="w-8 h-8 rounded-full items-center justify-center mr-2 mb-5"
+                    style={{ backgroundColor: avatarColor + '22' }}
+                >
+                    <Text className="text-xs font-bold" style={{ color: avatarColor }}>
+                        {initials}
+                    </Text>
+                </View>
+                <Wrapper
+                    {...(wrapperProps as any)}
+                    className="flex-1"
+                    accessibilityRole="text"
+                    accessibilityLabel={`${senderName}: ${content}. ${formatTime(timestamp)}`}
+                >
+                    {/* Sender name */}
+                    <Text className="text-xs font-medium mb-1 ml-1" style={{ color: avatarColor }}>
+                        {senderName}
+                    </Text>
+                    <View className="rounded-2xl rounded-bl-sm px-4 py-2.5 bg-[#FFFFFF]" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                        <Text className="text-[15px] leading-5 text-[#1F2937]">
+                            {content}
+                        </Text>
+                    </View>
+                    <View className="flex-row items-center mt-1 gap-1 justify-start">
+                        <Text className="text-[11px] text-[#9CA3AF]">
+                            {formatTime(timestamp)}
+                        </Text>
+                    </View>
+                </Wrapper>
+            </View>
+        );
+    }
+
     return (
         <Wrapper
             {...(wrapperProps as any)}
@@ -80,12 +124,13 @@ function ChatBubbleInner({
         >
             <View
                 className={`rounded-2xl px-4 py-2.5 ${isMine
-                    ? 'bg-[#5C6B3C] rounded-br-sm'
-                    : 'bg-[#F0EBE3] border border-[#E8E2D9] rounded-bl-sm'
+                    ? 'bg-[#059669] rounded-br-sm'
+                    : 'bg-[#FFFFFF] rounded-bl-sm'
                     }`}
+                style={!isMine ? { borderWidth: 1, borderColor: '#E5E7EB' } : undefined}
             >
                 <Text
-                    className={`text-[15px] leading-5 ${isMine ? 'text-white' : 'text-[#2C2C2C]'
+                    className={`text-[15px] leading-5 ${isMine ? 'text-white' : 'text-[#1F2937]'
                         }`}
                 >
                     {content}
@@ -97,7 +142,7 @@ function ChatBubbleInner({
                 className={`flex-row items-center mt-1 gap-1 ${isMine ? 'justify-end' : 'justify-start'
                     }`}
             >
-                <Text className="text-[11px] text-[#A0977D]">
+                <Text className="text-[11px] text-[#9CA3AF]">
                     {formatTime(timestamp)}
                 </Text>
                 {statusIcon && (

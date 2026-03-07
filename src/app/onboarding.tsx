@@ -113,7 +113,7 @@ export default function OnboardingScreen() {
         if (!trimmed) return; // Name is required
         updateSettings({ displayName: trimmed, onboardingComplete: true });
         setOnboardingComplete();
-        router.replace('/(tabs)/peers');
+        router.replace('/(tabs)/chats');
     };
 
     const isIntroStep = step < STEPS.length;
@@ -121,7 +121,7 @@ export default function OnboardingScreen() {
     const isNameStep = step === STEPS.length + 1;
 
     return (
-        <SafeAreaView className="flex-1 bg-[#FAF6F1]" style={{ flex: 1, backgroundColor: '#FAF6F1' }}>
+        <SafeAreaView className="flex-1 bg-[#F9FAFB]" style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
             <StatusBar barStyle="dark-content" />
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -134,7 +134,7 @@ export default function OnboardingScreen() {
                         {[...STEPS, {}, {}].map((_, i) => (
                             <View
                                 key={i}
-                                className={`h-1.5 rounded-full ${i === step ? 'w-6 bg-[#5C6B3C]' : 'w-1.5 bg-[#D9D2C7]'
+                                className={`h-1.5 rounded-full ${i === step ? 'w-6 bg-[#059669]' : 'w-1.5 bg-[#E5E7EB]'
                                     }`}
                             />
                         ))}
@@ -151,17 +151,17 @@ export default function OnboardingScreen() {
                     >
                         {isIntroStep && (
                             <>
-                                <View className="w-20 h-20 rounded-full bg-[#E8EDDF] items-center justify-center mb-8">
+                                <View className="w-16 h-16 rounded-2xl bg-[#ECFDF5] items-center justify-center mb-8">
                                     <Ionicons
                                         name={STEPS[step].icon}
-                                        size={36}
-                                        color="#5C6B3C"
+                                        size={32}
+                                        color="#059669"
                                     />
                                 </View>
-                                <Text className="text-[#2C2C2C] text-2xl font-bold text-center mb-4" style={{ color: '#2C2C2C' }}>
+                                <Text className="text-[#111827] text-2xl font-bold text-center mb-4" style={{ color: '#111827' }}>
                                     {STEPS[step].title}
                                 </Text>
-                                <Text className="text-[#7A7A7A] text-base text-center leading-6 mb-12 max-w-xs" style={{ color: '#7A7A7A' }}>
+                                <Text className="text-[#6B7280] text-base text-center leading-6 mb-12 max-w-xs" style={{ color: '#6B7280' }}>
                                     {STEPS[step].subtitle}
                                 </Text>
                             </>
@@ -169,42 +169,42 @@ export default function OnboardingScreen() {
 
                         {isPermissionStep && (
                             <>
-                                <View className="w-20 h-20 rounded-full bg-[#E8EDDF] items-center justify-center mb-8">
-                                    <Ionicons name="bluetooth-outline" size={36} color="#5C6B3C" />
+                                <View className="w-16 h-16 rounded-2xl bg-[#ECFDF5] items-center justify-center mb-8">
+                                    <Ionicons name="bluetooth-outline" size={32} color="#059669" />
                                 </View>
                                 <Text
-                                    className="text-[#2C2C2C] text-2xl font-bold text-center mb-3"
-                                    style={{ color: '#2C2C2C' }}
+                                    className="text-[#111827] text-2xl font-bold text-center mb-3"
+                                    style={{ color: '#111827' }}
                                     accessibilityRole="header"
                                 >
                                     Enable Bluetooth
                                 </Text>
                                 <Text
-                                    className="text-[#7A7A7A] text-sm text-center mb-8 max-w-xs"
-                                    style={{ color: '#7A7A7A' }}
+                                    className="text-[#6B7280] text-sm text-center mb-8 max-w-xs"
+                                    style={{ color: '#6B7280' }}
                                 >
                                     Meshlink needs Bluetooth to discover nearby devices and relay messages securely.
                                 </Text>
                                 {permStatus === 'granted' && (
-                                    <View className="flex-row items-center bg-[#E2EDD5] rounded-xl px-4 py-3 mb-4">
-                                        <Ionicons name="checkmark-circle" size={20} color="#4A7C59" />
-                                        <Text className="text-[#3D6B4A] text-sm font-medium ml-2">
+                                    <View className="flex-row items-center bg-[#ECFDF5] rounded-xl px-4 py-3 mb-4">
+                                        <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
+                                        <Text className="text-[#059669] text-sm font-medium ml-2">
                                             Bluetooth permission granted
                                         </Text>
                                     </View>
                                 )}
                                 {permStatus === 'blocked' && (
                                     <View className="flex-row items-center bg-[#FEF2F2] rounded-xl px-4 py-3 mb-4">
-                                        <Ionicons name="alert-circle" size={20} color="#B85C4A" />
-                                        <Text className="text-[#7F1D1D] text-sm font-medium ml-2">
+                                        <Ionicons name="alert-circle" size={20} color="#EF4444" />
+                                        <Text className="text-[#EF4444] text-sm font-medium ml-2">
                                             Permission blocked — enable in device Settings
                                         </Text>
                                     </View>
                                 )}
                                 {permStatus === 'denied' && (
-                                    <View className="flex-row items-center bg-[#FEF2F2] rounded-xl px-4 py-3 mb-4">
-                                        <Ionicons name="alert-circle" size={20} color="#C4903D" />
-                                        <Text className="text-[#7F1D1D] text-sm font-medium ml-2">
+                                    <View className="flex-row items-center bg-[#2A2515] rounded-xl px-4 py-3 mb-4">
+                                        <Ionicons name="alert-circle" size={20} color="#F59E0B" />
+                                        <Text className="text-[#FCD34D] text-sm font-medium ml-2">
                                             Permission denied — tap below to try again
                                         </Text>
                                     </View>
@@ -214,19 +214,19 @@ export default function OnboardingScreen() {
 
                         {isNameStep && (
                             <>
-                                <View className="w-20 h-20 rounded-full bg-[#E8EDDF] items-center justify-center mb-8">
-                                    <Ionicons name="person-outline" size={36} color="#5C6B3C" />
+                                <View className="w-16 h-16 rounded-2xl bg-[#ECFDF5] items-center justify-center mb-8">
+                                    <Ionicons name="person-outline" size={32} color="#059669" />
                                 </View>
-                                <Text className="text-[#2C2C2C] text-2xl font-bold text-center mb-3" style={{ color: '#2C2C2C' }}>
+                                <Text className="text-[#111827] text-2xl font-bold text-center mb-3" style={{ color: '#111827' }}>
                                     What should we call you?
                                 </Text>
-                                <Text className="text-[#7A7A7A] text-sm text-center mb-8" style={{ color: '#7A7A7A' }}>
+                                <Text className="text-[#6B7280] text-sm text-center mb-8" style={{ color: '#6B7280' }}>
                                     This name is visible to nearby peers
                                 </Text>
                                 <TextInput
-                                    className="bg-white text-[#2C2C2C] text-base w-full rounded-xl px-4 py-3.5 border border-[#E8E2D9] text-center"
+                                    className="bg-[#FFFFFF] text-[#111827] text-base w-full rounded-xl px-4 py-3.5 border border-[#E5E7EB] text-center"
                                     placeholder="Enter your name"
-                                    placeholderTextColor="#A0977D"
+                                    placeholderTextColor="#9CA3AF"
                                     value={name}
                                     onChangeText={setName}
                                     maxLength={20}
@@ -244,14 +244,7 @@ export default function OnboardingScreen() {
                             onPress={handleNext}
                             accessibilityRole="button"
                             accessibilityLabel={step === STEPS.length - 1 ? 'Get Started' : 'Next'}
-                            className="bg-[#5C6B3C] rounded-xl py-4 items-center"
-                            style={{
-                                shadowColor: '#5C6B3C',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: 0.25,
-                                shadowRadius: 8,
-                                elevation: 4,
-                            }}
+                            className="bg-[#059669] rounded-xl py-4 items-center"
                         >
                             <Text className="text-white font-semibold text-base" style={{ color: 'white' }}>
                                 {step === STEPS.length - 1 ? 'Get Started' : 'Next'}
@@ -265,14 +258,7 @@ export default function OnboardingScreen() {
                                     onPress={handlePermission}
                                     accessibilityRole="button"
                                     accessibilityLabel="Allow Bluetooth access"
-                                    className="bg-[#5C6B3C] rounded-xl py-4 items-center mb-3"
-                                    style={{
-                                        shadowColor: '#5C6B3C',
-                                        shadowOffset: { width: 0, height: 2 },
-                                        shadowOpacity: 0.25,
-                                        shadowRadius: 8,
-                                        elevation: 4,
-                                    }}
+                                    className="bg-[#059669] rounded-xl py-4 items-center mb-3"
                                 >
                                     <Text className="text-white font-semibold text-base">
                                         Allow Bluetooth
@@ -285,26 +271,15 @@ export default function OnboardingScreen() {
                                 accessibilityLabel={permStatus === 'granted' ? 'Continue' : 'Skip for now'}
                                 className={
                                     permStatus === 'granted'
-                                        ? 'bg-[#5C6B3C] rounded-xl py-4 items-center'
+                                        ? 'bg-[#059669] rounded-xl py-4 items-center'
                                         : 'py-4 items-center'
-                                }
-                                style={
-                                    permStatus === 'granted'
-                                        ? {
-                                              shadowColor: '#5C6B3C',
-                                              shadowOffset: { width: 0, height: 2 },
-                                              shadowOpacity: 0.25,
-                                              shadowRadius: 8,
-                                              elevation: 4,
-                                          }
-                                        : undefined
                                 }
                             >
                                 <Text
                                     className={
                                         permStatus === 'granted'
                                             ? 'text-white font-semibold text-base'
-                                            : 'text-[#A0977D] text-sm'
+                                            : 'text-[#6B7280] text-sm'
                                     }
                                 >
                                     {permStatus === 'granted' ? 'Continue' : 'Skip for now'}
@@ -315,19 +290,12 @@ export default function OnboardingScreen() {
                     {isNameStep && (
                         <TouchableOpacity
                             onPress={handleFinish}
-                            className={`rounded-xl py-4 items-center ${name.trim() ? 'bg-[#5C6B3C]' : 'bg-[#D9D2C7]'
+                            className={`rounded-xl py-4 items-center ${name.trim() ? 'bg-[#059669]' : 'bg-[#E5E7EB]'
                                 }`}
                             disabled={!name.trim()}
-                            style={name.trim() ? {
-                                shadowColor: '#5C6B3C',
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: 0.25,
-                                shadowRadius: 8,
-                                elevation: 4,
-                            } : undefined}
                         >
                             <Text
-                                className={`font-semibold text-base ${name.trim() ? 'text-white' : 'text-[#A0977D]'
+                                    className={`font-semibold text-base ${name.trim() ? 'text-white' : 'text-[#6B7280]'
                                     }`}
                             >
                                 {name.trim() ? 'Enter Meshlink' : 'Enter a name to continue'}

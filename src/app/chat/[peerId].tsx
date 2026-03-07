@@ -13,7 +13,7 @@ import {
     Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useMesh } from '../../context/MeshContext';
 import { useToast } from '../../context/ToastContext';
@@ -85,34 +85,46 @@ export default function ChatScreen() {
     };
 
     return (
-        <SafeAreaView className="flex-1 bg-[#FAF6F1]" style={{ flex: 1, backgroundColor: '#FAF6F1' }}>
+        <SafeAreaView className="flex-1 bg-[#F9FAFB]" style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
             <Stack.Screen
                 options={{
                     headerTitle: () => (
-                        <View className="flex-row items-center">
+                        <TouchableOpacity
+                            activeOpacity={0.7}
+                            className="flex-row items-center"
+                        >
                             <View
-                                className="w-8 h-8 rounded-full items-center justify-center mr-2.5"
-                                style={{ backgroundColor: color + '20' }}
+                                className="w-9 h-9 rounded-full items-center justify-center mr-3"
+                                style={{ backgroundColor: color + '22' }}
                             >
                                 <Text className="text-xs font-bold" style={{ color }}>
                                     {peerNickname.slice(0, 2).toUpperCase() || '??'}
                                 </Text>
                             </View>
                             <View>
-                                <Text className="text-[#2C2C2C] font-semibold text-base">
+                                <Text className="text-[#111827] font-bold text-[16px]">
                                     {peerNickname}
                                 </Text>
-                                <Text
-                                    className={`text-[11px] ${isConnected ? 'text-[#4A7C59]' : 'text-[#A0977D]'
-                                        }`}
-                                >
-                                    {isConnected ? 'Connected' : 'Offline'}
-                                </Text>
+                                <View className="flex-row items-center mt-0.5">
+                                    <View
+                                        className={`w-2 h-2 rounded-full mr-1.5 ${isConnected ? 'bg-[#22C55E]' : 'bg-[#4B5563]'}`}
+                                    />
+                                    <Text className="text-[11px] text-[#6B7280]">
+                                        {isConnected ? 'Connected' : 'Offline'}
+                                    </Text>
+                                </View>
                             </View>
+                        </TouchableOpacity>
+                    ),
+                    headerRight: () => (
+                        <View className="flex-row items-center mr-2">
+                            <TouchableOpacity className="w-8 h-8 rounded-full bg-[#FFFFFF] items-center justify-center" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                <Ionicons name="ellipsis-vertical" size={16} color="#6B7280" />
+                            </TouchableOpacity>
                         </View>
                     ),
-                    headerStyle: { backgroundColor: '#FAF6F1' },
-                    headerTintColor: '#2C2C2C',
+                    headerStyle: { backgroundColor: '#F9FAFB' },
+                    headerTintColor: '#111827',
                     headerShadowVisible: false,
                 }}
             />
@@ -143,12 +155,17 @@ export default function ChatScreen() {
                     }
                     ListEmptyComponent={
                         <View className="items-center">
-                            <Ionicons
-                                name="chatbubble-ellipses-outline"
-                                size={48}
-                                color="#D9D2C7"
-                            />
-                            <Text className="text-[#A0977D] text-sm mt-3">
+                            <View className="w-16 h-16 rounded-full bg-[#FFFFFF] items-center justify-center mb-4" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                <Ionicons
+                                    name="chatbubble-ellipses-outline"
+                                    size={28}
+                                    color="#4B5563"
+                                />
+                            </View>
+                            <Text className="text-[#111827] text-base font-semibold mb-1">
+                                No messages yet
+                            </Text>
+                            <Text className="text-[#6B7280] text-sm">
                                 Send the first message!
                             </Text>
                         </View>
@@ -161,36 +178,46 @@ export default function ChatScreen() {
                             status={item.isMine ? item.status : undefined}
                             messageId={item.id}
                             onDelete={handleDelete}
+                            senderName={!item.isMine ? peerNickname : undefined}
+                            senderColor={!item.isMine ? color : undefined}
                         />
                     )}
                 />
 
                 {/* Input Bar */}
-                <View className="flex-row items-end px-4 py-3 border-t border-[#E8E2D9] bg-[#FAF6F1]">
-                    <TextInput
-                        className="flex-1 bg-white text-[#2C2C2C] rounded-2xl px-4 py-2.5 text-[15px] border border-[#E8E2D9] max-h-24"
-                        placeholder="Type a message…"
-                        placeholderTextColor="#A0977D"
-                        value={input}
-                        onChangeText={setInput}
-                        multiline
-                        returnKeyType="default"
-                        accessibilityLabel="Message input"
-                        accessibilityHint="Type your message here"
-                    />
+                <View className="flex-row items-end px-3 py-2.5 bg-[#F9FAFB] border-t border-[#E5E7EB]">
+                    <TouchableOpacity
+                        className="w-10 h-10 rounded-full items-center justify-center mr-1"
+                        accessibilityLabel="Attach file"
+                    >
+                        <Ionicons name="add-circle-outline" size={24} color="#9CA3AF" />
+                    </TouchableOpacity>
+                    <View className="flex-1 flex-row items-end bg-[#FFFFFF] rounded-2xl px-4 py-0.5" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                        <TextInput
+                            className="flex-1 text-[#111827] text-[15px] py-2.5 max-h-24"
+                            placeholder="Send a message…"
+                            placeholderTextColor="#9CA3AF"
+                            value={input}
+                            onChangeText={setInput}
+                            multiline
+                            returnKeyType="default"
+                            accessibilityLabel="Message input"
+                            accessibilityHint="Type your message here"
+                        />
+                    </View>
                     <TouchableOpacity
                         onPress={handleSend}
                         disabled={!input.trim() || isSending}
                         accessibilityRole="button"
                         accessibilityLabel="Send message"
                         accessibilityState={{ disabled: !input.trim() || isSending }}
-                        className={`ml-2.5 w-10 h-10 rounded-full items-center justify-center ${input.trim() ? 'bg-[#5C6B3C]' : 'bg-[#E8E2D9]'
+                        className={`ml-1.5 w-10 h-10 rounded-full items-center justify-center ${input.trim() ? 'bg-[#059669]' : 'bg-[#E5E7EB]'
                             }`}
                     >
                         <Ionicons
                             name="arrow-up"
                             size={20}
-                            color={input.trim() ? '#FFFFFF' : '#A0977D'}
+                            color={input.trim() ? '#FFFFFF' : '#4B5563'}
                         />
                     </TouchableOpacity>
                 </View>

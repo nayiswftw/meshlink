@@ -23,18 +23,10 @@ function SettingsSection({
 }) {
     return (
         <View className="mb-6">
-            <Text className="text-[#A0977D] text-xs font-semibold uppercase tracking-wider mb-2 px-1">
+            <Text className="text-[#6B7280] text-xs font-semibold uppercase tracking-wider mb-2 px-1">
                 {title}
             </Text>
-            <View className="bg-white rounded-2xl border border-[#E8E2D9] overflow-hidden"
-                style={{
-                    shadowColor: '#8B7D6B',
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.06,
-                    shadowRadius: 4,
-                    elevation: 2,
-                }}
-            >
+            <View className="bg-[#FFFFFF] rounded-2xl border border-[#E5E7EB] overflow-hidden">
                 {children}
             </View>
         </View>
@@ -43,7 +35,7 @@ function SettingsSection({
 
 function SettingsRow({
     icon,
-    iconColor = '#A0977D',
+    iconColor = '#6B7280',
     label,
     children,
     last = false,
@@ -56,11 +48,11 @@ function SettingsRow({
 }) {
     return (
         <View
-            className={`flex-row items-center px-4 py-3.5 ${!last ? 'border-b border-[#E8E2D9]' : ''
+            className={`flex-row items-center px-4 py-3.5 ${!last ? 'border-b border-[#F3F4F6]' : ''
                 }`}
         >
             <Ionicons name={icon} size={20} color={iconColor} />
-            <Text className="text-[#2C2C2C] text-base flex-1 ml-3">{label}</Text>
+            <Text className="text-[#111827] text-base flex-1 ml-3">{label}</Text>
             {children}
         </View>
     );
@@ -97,31 +89,32 @@ export default function SettingsScreen() {
     };
 
     return (
-        <View className="flex-1 bg-[#FAF6F1]" style={{ flex: 1, backgroundColor: '#FAF6F1' }}>
+        <View className="flex-1 bg-[#F9FAFB]" style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
             <ScrollView
-                contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 }}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 100 }}
+                showsVerticalScrollIndicator={false}
             >
                 {/* Profile Header */}
                 <View className="items-center py-6 mb-4">
-                    <View className="w-20 h-20 rounded-full bg-[#E8EDDF] items-center justify-center mb-4">
-                        <Text className="text-3xl font-bold text-[#5C6B3C]">
+                    <View className="w-20 h-20 rounded-full bg-[#ECFDF5] items-center justify-center mb-4">
+                        <Text className="text-3xl font-bold text-[#059669]">
                             {(settings.displayName || nickname || '?')
                                 .charAt(0)
                                 .toUpperCase()}
                         </Text>
                     </View>
-                    <Text className="text-[#2C2C2C] text-xl font-bold">
+                    <Text className="text-[#111827] text-xl font-bold">
                         {settings.displayName || nickname || 'Unknown'}
                     </Text>
                 </View>
 
                 {/* Profile */}
                 <SettingsSection title="Profile">
-                    <SettingsRow icon="person-outline" iconColor="#5C6B3C" label="Display Name" last>
+                    <SettingsRow icon="person-outline" iconColor="#059669" label="Display Name" last>
                         {editingName ? (
                             <View className="flex-row items-center">
                                 <TextInput
-                                    className="bg-[#FAF6F1] text-[#2C2C2C] text-sm rounded-lg px-3 py-1.5 w-28 mr-2 border border-[#E8E2D9]"
+                                    className="bg-[#F9FAFB] text-[#111827] text-sm rounded-lg px-3 py-1.5 w-28 mr-2 border border-[#E5E7EB]"
                                     value={nameInput}
                                     onChangeText={setNameInput}
                                     maxLength={20}
@@ -129,7 +122,7 @@ export default function SettingsScreen() {
                                     onSubmitEditing={handleSaveName}
                                 />
                                 <TouchableOpacity onPress={handleSaveName}>
-                                    <Ionicons name="checkmark-circle" size={24} color="#4A7C59" />
+                                    <Ionicons name="checkmark-circle" size={24} color="#059669" />
                                 </TouchableOpacity>
                             </View>
                         ) : (
@@ -140,10 +133,10 @@ export default function SettingsScreen() {
                                 }}
                                 className="flex-row items-center"
                             >
-                                <Text className="text-[#7A7A7A] text-sm mr-1">
+                                <Text className="text-[#6B7280] text-sm mr-1">
                                     {settings.displayName || nickname}
                                 </Text>
-                                <Ionicons name="pencil-outline" size={14} color="#A0977D" />
+                                <Ionicons name="pencil-outline" size={14} color="#9CA3AF" />
                             </TouchableOpacity>
                         )}
                     </SettingsRow>
@@ -153,7 +146,7 @@ export default function SettingsScreen() {
                 <SettingsSection title="Mesh Network">
                     <SettingsRow
                         icon="radio-outline"
-                        iconColor={isRunning ? '#4A7C59' : '#B85C4A'}
+                        iconColor={isRunning ? '#059669' : '#EF4444'}
                         label="Mesh Service"
                     >
                         {isRunning ? (
@@ -161,37 +154,37 @@ export default function SettingsScreen() {
                                 onPress={handleStopMesh}
                                 accessibilityRole="button"
                                 accessibilityLabel="Stop mesh service"
-                                className="bg-[#F5E6D3] rounded-lg px-3 py-1.5"
+                                className="bg-[#FEF2F2] rounded-lg px-3 py-1.5"
                             >
-                                <Text className="text-[#B85C4A] text-xs font-semibold">Stop</Text>
+                                <Text className="text-[#EF4444] text-xs font-semibold">Stop</Text>
                             </TouchableOpacity>
                         ) : (
                             <TouchableOpacity
                                 onPress={handleStartMesh}
                                 accessibilityRole="button"
                                 accessibilityLabel="Start mesh service"
-                                className="bg-[#5C6B3C] rounded-lg px-3 py-1.5"
+                                className="bg-[#059669] rounded-lg px-3 py-1.5"
                             >
                                 <Text className="text-white text-xs font-semibold">Start</Text>
                             </TouchableOpacity>
                         )}
                     </SettingsRow>
-                    <SettingsRow icon="notifications-outline" iconColor="#C4903D" label="Notifications" last>
+                    <SettingsRow icon="notifications-outline" iconColor="#F59E0B" label="Notifications" last>
                         <Switch
                             value={settings.notificationsEnabled}
                             onValueChange={(v) =>
                                 updateSettings({ notificationsEnabled: v })
                             }
-                            trackColor={{ false: '#D9D2C7', true: '#5C6B3C' }}
-                            thumbColor={settings.notificationsEnabled ? '#A8B89C' : '#B8B0A0'}
+                            trackColor={{ false: '#E5E7EB', true: '#059669' }}
+                            thumbColor="#FFFFFF"
                         />
                     </SettingsRow>
                 </SettingsSection>
 
                 {/* About */}
                 <SettingsSection title="About">
-                    <SettingsRow icon="information-circle-outline" iconColor="#6B8FA3" label="Version" last>
-                        <Text className="text-[#A0977D] text-sm">1.0.0</Text>
+                    <SettingsRow icon="information-circle-outline" iconColor="#3B82F6" label="Version" last>
+                        <Text className="text-[#6B7280] text-sm">1.0.0</Text>
                     </SettingsRow>
                 </SettingsSection>
             </ScrollView>

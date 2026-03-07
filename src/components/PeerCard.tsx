@@ -1,5 +1,5 @@
 /**
- * PeerCard — Peer list item showing nickname and peer ID.
+ * PeerCard — Flat row peer list item showing avatar, nickname, and status.
  * expo-bitchat manages connection state natively.
  */
 import React from 'react';
@@ -20,46 +20,40 @@ function PeerCardInner({ peerID, nickname, onPress }: PeerCardProps) {
     return (
         <TouchableOpacity
             onPress={() => onPress(peerID, nickname)}
-            activeOpacity={0.7}
+            activeOpacity={0.6}
             accessibilityRole="button"
             accessibilityLabel={`Chat with ${nickname}, connected`}
             accessibilityHint="Opens a conversation with this peer"
-            className="flex-row items-center bg-white rounded-2xl px-4 py-3.5 mb-3 border border-[#E8E2D9]"
-            style={{
-                shadowColor: '#8B7D6B',
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.06,
-                shadowRadius: 4,
-                elevation: 2,
-            }}
+            className="flex-row items-center py-3.5"
         >
-            {/* Avatar */}
-            <View
-                className="w-12 h-12 rounded-full items-center justify-center mr-3.5"
-                style={{ backgroundColor: color + '20' }}
-            >
-                <Text className="text-base font-bold" style={{ color }}>
-                    {initials}
-                </Text>
+            {/* Avatar with online dot */}
+            <View className="relative mr-3">
+                <View
+                    className="w-12 h-12 rounded-full items-center justify-center"
+                    style={{ backgroundColor: color + '22' }}
+                >
+                    <Text className="text-sm font-bold" style={{ color }}>
+                        {initials}
+                    </Text>
+                </View>
+                <View className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#22C55E] border-2 border-[#F9FAFB]" />
             </View>
 
             {/* Info */}
             <View className="flex-1">
-                <Text className="text-[#2C2C2C] font-semibold text-base" numberOfLines={1}>
+                <Text className="text-[#111827] font-semibold text-[15px]" numberOfLines={1}>
                     {nickname}
                 </Text>
-                <View className="flex-row items-center mt-1">
-                    <View className="w-2 h-2 rounded-full mr-1.5 bg-[#4A7C59]" />
-                    <Text className="text-[#7A7A7A] text-xs">Connected</Text>
-                </View>
+                <Text className="text-[#6B7280] text-xs mt-0.5">Connected via BLE</Text>
             </View>
 
-            <Ionicons
-                name="chevron-forward"
-                size={16}
-                color="#B8B0A0"
-                style={{ marginLeft: 8 }}
-            />
+            <TouchableOpacity
+                onPress={() => onPress(peerID, nickname)}
+                className="w-9 h-9 rounded-full bg-[#ECFDF5] items-center justify-center"
+                accessibilityLabel={`Message ${nickname}`}
+            >
+                <Ionicons name="chatbubble" size={14} color="#059669" />
+            </TouchableOpacity>
         </TouchableOpacity>
     );
 }

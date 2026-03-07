@@ -82,29 +82,42 @@ export default function ChannelChatScreen() {
     const channelColor = peerColor(decodedName);
 
     return (
-        <SafeAreaView className="flex-1 bg-[#FAF6F1]" style={{ flex: 1, backgroundColor: '#FAF6F1' }}>
+        <SafeAreaView className="flex-1 bg-[#F9FAFB]" style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
             <Stack.Screen
                 options={{
                     headerTitle: () => (
                         <View className="flex-row items-center">
                             <View
-                                className="w-8 h-8 rounded-full items-center justify-center mr-2.5"
-                                style={{ backgroundColor: channelColor + '20' }}
+                                className="flex-row items-center bg-[#FFFFFF] rounded-full px-3 py-1.5 mr-3"
+                            style={{ borderWidth: 1, borderColor: '#E5E7EB' }}
                             >
-                                <Ionicons name="chatbubbles" size={16} color={channelColor} />
-                            </View>
-                            <View>
-                                <Text className="text-[#2C2C2C] font-semibold text-base">
+                                <Text className="text-sm font-bold mr-1" style={{ color: channelColor }}>#</Text>
+                                <Text className="text-[#111827] font-semibold text-[14px]">
                                     {decodedName}
                                 </Text>
-                                <Text className="text-[11px] text-[#A0977D]">
-                                    {connectedPeerCount} peer{connectedPeerCount !== 1 ? 's' : ''} in mesh
+                            </View>
+                            <View className="flex-row items-center">
+                                <Ionicons name="people-outline" size={13} color="#6B7280" />
+                                <Text className="text-[11px] text-[#6B7280] ml-1">
+                                    {connectedPeerCount}
+                                </Text>
+                                <View className="w-1 h-1 rounded-full bg-[#4B5563] mx-2" />
+                                <Ionicons name="chatbubble-outline" size={11} color="#6B7280" />
+                                <Text className="text-[11px] text-[#6B7280] ml-1">
+                                    {messages.length}
                                 </Text>
                             </View>
                         </View>
                     ),
-                    headerStyle: { backgroundColor: '#FAF6F1' },
-                    headerTintColor: '#2C2C2C',
+                    headerRight: () => (
+                        <View className="flex-row items-center mr-2">
+                            <TouchableOpacity className="w-8 h-8 rounded-full bg-[#FFFFFF] items-center justify-center" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                <Ionicons name="ellipsis-vertical" size={16} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+                    ),
+                    headerStyle: { backgroundColor: '#F9FAFB' },
+                    headerTintColor: '#111827',
                     headerShadowVisible: false,
                 }}
             />
@@ -135,65 +148,65 @@ export default function ChannelChatScreen() {
                     }
                     ListEmptyComponent={
                         <View className="items-center">
-                            <Ionicons
-                                name="chatbubbles-outline"
-                                size={48}
-                                color="#D9D2C7"
-                            />
-                            <Text className="text-[#A0977D] text-sm mt-3">
-                                Start the conversation in {decodedName}
+                            <View className="w-16 h-16 rounded-2xl bg-[#FFFFFF] items-center justify-center mb-4" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                                <Text className="text-2xl font-bold" style={{ color: channelColor }}>#</Text>
+                            </View>
+                            <Text className="text-[#111827] text-base font-semibold mb-1">
+                                Welcome to {decodedName}
+                            </Text>
+                            <Text className="text-[#6B7280] text-sm">
+                                Start the conversation!
                             </Text>
                         </View>
                     }
                     renderItem={({ item }) => (
-                        <View>
-                            {/* Show sender name for group messages */}
-                            {!item.isMine && (
-                                <Text
-                                    className="text-xs font-medium ml-1 mb-0.5"
-                                    style={{ color: peerColor(item.sender) }}
-                                >
-                                    {item.sender}
-                                </Text>
-                            )}
-                            <ChatBubble
-                                content={item.content}
-                                timestamp={item.timestamp}
-                                isMine={item.isMine}
-                                status={item.isMine ? item.status : undefined}
-                                messageId={item.id}
-                                onDelete={handleDelete}
-                            />
-                        </View>
+                        <ChatBubble
+                            content={item.content}
+                            timestamp={item.timestamp}
+                            isMine={item.isMine}
+                            status={item.isMine ? item.status : undefined}
+                            messageId={item.id}
+                            onDelete={handleDelete}
+                            senderName={!item.isMine ? item.sender : undefined}
+                            senderColor={!item.isMine ? peerColor(item.sender) : undefined}
+                        />
                     )}
                 />
 
                 {/* Input Bar */}
-                <View className="flex-row items-end px-4 py-3 border-t border-[#E8E2D9] bg-[#FAF6F1]">
-                    <TextInput
-                        className="flex-1 bg-white text-[#2C2C2C] rounded-2xl px-4 py-2.5 text-[15px] border border-[#E8E2D9] max-h-24"
-                        placeholder={`Message ${decodedName}…`}
-                        placeholderTextColor="#A0977D"
-                        value={input}
-                        onChangeText={setInput}
-                        multiline
-                        returnKeyType="default"
-                        accessibilityLabel="Channel message input"
-                        accessibilityHint="Type your message for this channel"
-                    />
+                <View className="flex-row items-end px-3 py-2.5 bg-[#F9FAFB] border-t border-[#E5E7EB]">
+                    <TouchableOpacity
+                        className="w-10 h-10 rounded-full items-center justify-center mr-1"
+                        accessibilityLabel="Attach file"
+                    >
+                        <Ionicons name="add-circle-outline" size={24} color="#9CA3AF" />
+                    </TouchableOpacity>
+                    <View className="flex-1 flex-row items-end bg-[#FFFFFF] rounded-2xl px-4 py-0.5" style={{ borderWidth: 1, borderColor: '#E5E7EB' }}>
+                        <TextInput
+                            className="flex-1 text-[#111827] text-[15px] py-2.5 max-h-24"
+                            placeholder={`Message ${decodedName}…`}
+                            placeholderTextColor="#9CA3AF"
+                            value={input}
+                            onChangeText={setInput}
+                            multiline
+                            returnKeyType="default"
+                            accessibilityLabel="Channel message input"
+                            accessibilityHint="Type your message for this channel"
+                        />
+                    </View>
                     <TouchableOpacity
                         onPress={handleSend}
                         disabled={!input.trim() || isSending}
                         accessibilityRole="button"
                         accessibilityLabel="Send message"
                         accessibilityState={{ disabled: !input.trim() || isSending }}
-                        className={`ml-2.5 w-10 h-10 rounded-full items-center justify-center ${input.trim() ? 'bg-[#5C6B3C]' : 'bg-[#E8E2D9]'
+                        className={`ml-1.5 w-10 h-10 rounded-full items-center justify-center ${input.trim() ? 'bg-[#059669]' : 'bg-[#E5E7EB]'
                             }`}
                     >
                         <Ionicons
                             name="arrow-up"
                             size={20}
-                            color={input.trim() ? '#FFFFFF' : '#A0977D'}
+                            color={input.trim() ? '#FFFFFF' : '#4B5563'}
                         />
                     </TouchableOpacity>
                 </View>

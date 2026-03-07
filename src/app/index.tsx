@@ -16,15 +16,15 @@ export default function Index() {
     if (!isInitialised) return; // Wait for hydration to complete
 
     if (isOnboardingComplete()) {
-      router.replace('/(tabs)/peers');
+      router.replace('/(tabs)/chats');
     } else {
       router.replace('/onboarding');
     }
   }, [isInitialised]);
 
   return (
-    <View className="flex-1 bg-[#FAF6F1] items-center justify-center">
-      <ActivityIndicator size="large" color="#5C6B3C" />
+    <View className="flex-1 bg-[#F9FAFB] items-center justify-center">
+      <ActivityIndicator size="large" color="#059669" />
     </View>
   );
 }

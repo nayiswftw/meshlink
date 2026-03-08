@@ -477,18 +477,16 @@ export class RelayService {
 
         const encoded = this.encodeSOSMessage(payload);
 
-        const peerIDs = Object.keys(connectedPeers);
-        log.info(`Broadcasting SOS to ${peerIDs.length} peers`);
+        log.info(`Broadcasting SOS to mesh`);
 
-        const promises = peerIDs.map(async (peerID) => {
-            try {
-                await BitchatAPI.sendPrivateMessage(encoded, peerID, connectedPeers[peerID]);
-            } catch (error) {
-                log.error(`Failed to send SOS to ${connectedPeers[peerID]}:`, error);
-            }
-        });
+        // Send as unencrypted broadcast so SOS reaches all peers
+        // without requiring completed key exchange
+        try {
+            await BitchatAPI.sendMessage(encoded, []);
+        } catch (error) {
+            log.error('SOS broadcast failed:', error);
+        }
 
-        await Promise.allSettled(promises);
         log.info('SOS broadcast complete');
     }
 

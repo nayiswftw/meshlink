@@ -159,12 +159,20 @@ export function MeshProvider({ children }: { children: ReactNode }) {
     const subscriptionsRef = useRef<Subscription[]>([]);
     const appStateRef = useRef<AppStateStatus>(RNAppState.currentState);
     const notificationsEnabledRef = useRef(settings.notificationsEnabled);
+    const peersRef = useRef(peers);
+    const settingsRef = useRef(settings);
     const isStartingRef = useRef(false);
 
-    // Keep the ref in sync
+    // Keep refs in sync
     useEffect(() => {
         notificationsEnabledRef.current = settings.notificationsEnabled;
     }, [settings.notificationsEnabled]);
+    useEffect(() => {
+        peersRef.current = peers;
+    }, [peers]);
+    useEffect(() => {
+        settingsRef.current = settings;
+    }, [settings]);
 
     // ─── Initialise ──────────────────────────────────────────
 
@@ -196,11 +204,11 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         subscriptionsRef.current.forEach((s) => s.remove());
         subscriptionsRef.current = [];
 
-        // Get current display name for relay checks
-        const myDisplayName = getAppDisplayName(settings);
-
         // Incoming messages
         const msgSub = BitchatAPI.addMessageListener(async (message: BitchatMessage) => {
+            // Compute fresh display name from ref on each message arrival
+            const myDisplayName = getAppDisplayName(settingsRef.current);
+
             log.info(`Message from ${message.sender}: ${message.content.slice(0, 50)}`);
 
             // Deduplicate — mesh networks may deliver the same message twice
@@ -211,7 +219,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
             // ── SOS Detection ─────────────────────────────
             if (RelayService.isSOSMessage(message.content)) {
                 const sosPayload = RelayService.parseSOSMessage(message.content);
-                if (sosPayload && sosPayload.senderPeerID !== myDisplayName) {
+                if (sosPayload && sosPayload.senderNickname !== myDisplayName) {
                     log.info(`SOS received from ${sosPayload.senderNickname}`);
                     setActiveSOSAlert(sosPayload);
                     // Force-notify regardless of notification settings
@@ -223,7 +231,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                     RelayService.relaySOSMessage(
                         message.id,
                         sosPayload,
-                        peers,
+                        peersRef.current,
                         message.senderPeerID
                     ).catch((e) => log.error('SOS relay failed:', e));
                 }
@@ -253,7 +261,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
                 try {
                     const wasRelayed = await RelayService.processIncomingMessage(
                         message,
-                        peers,
+                        peersRef.current,
                         isForMe
                     );
                     if (wasRelayed) {
@@ -398,7 +406,7 @@ export function MeshProvider({ children }: { children: ReactNode }) {
         });
 
         subscriptionsRef.current = [msgSub, peerConnSub, peerDiscSub, peerListSub, ackSub, statusSub];
-    }, [peers, settings, nickname]);
+    }, [settings, nickname]);
 
     const startMesh = useCallback(async () => {
         if (isStartingRef.current) return;

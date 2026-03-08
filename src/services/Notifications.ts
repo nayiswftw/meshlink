@@ -13,13 +13,17 @@ const log = createLogger('Notifications');
 
 // Configure how notifications appear when app is in foreground
 Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-        shouldShowAlert: false,
-        shouldShowBanner: false,
-        shouldShowList: false,
-        shouldPlaySound: false,
-        shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+        // Always show SOS notifications even in foreground
+        const isSOS = notification.request.content.body?.includes('🚨 SOS:') ?? false;
+        return {
+            shouldShowAlert: isSOS,
+            shouldShowBanner: isSOS,
+            shouldShowList: isSOS,
+            shouldPlaySound: isSOS,
+            shouldSetBadge: false,
+        };
+    },
 });
 
 /**

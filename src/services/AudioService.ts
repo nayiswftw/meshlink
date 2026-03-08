@@ -53,7 +53,7 @@ export async function stopRecording(): Promise<string | null> {
     activeRecording = null;
 
     try {
-        recording.stop();
+        await recording.stop();
         const uri = recording.uri;
         if (!uri) return null;
 
@@ -102,13 +102,12 @@ export async function playAudio(base64Data: string, messageId: string, onComplet
         const player = new AudioModule.AudioPlayer(tempUri, 500, false, 0);
         activePlayers.set(messageId, player);
 
-        const checkInterval = setInterval(() => {
-            if (player.isLoaded && !player.playing && player.currentTime >= (player.duration - 0.5)) {
-                clearInterval(checkInterval);
+        player.addListener('playbackStatusUpdate', (status: { didJustFinish: boolean }) => {
+            if (status.didJustFinish) {
                 stopAudio(messageId);
                 onComplete?.();
             }
-        }, 500);
+        });
 
         player.play();
     } catch (error) {

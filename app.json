@@ -24,7 +24,9 @@
           "color": "#6366F1"
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-asset",
+      "expo-audio"
     ],
     "android": {
       "adaptiveIcon": {
